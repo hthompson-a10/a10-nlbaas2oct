@@ -35,9 +35,11 @@ cli_opts = [
                help='Migrate the Thunder with this name'),
     cfg.StrOpt('project_id',
                help='Migrate the Thunder bound to this tenant/project'),
+    cfg.StrOpt('a10-config-file')
 ]
 
 migration_opts = [
+    cf.
     cfg.BoolOpt('delete_after_migration', default=True,
                 help='Delete the load balancer records from neutron-lbaas'
                      ' after migration'),
@@ -51,6 +53,9 @@ migration_opts = [
     cfg.StrOpt('a10_oct_connection',
                required=True,
                help='The a10 octavia database connection string'),
+    cfg.StrOpt('a10_config_path',
+               required=True,
+               help='Path to config.py file used by the A10 networks lbaas driver'),
 ]
 
 cfg.CONF.register_cli_opts(cli_opts)
@@ -58,11 +63,11 @@ cfg.CONF.register_opts(migration_opts, group='migration')
 
 
 def main():
-    if len(sys.argv) < 2:
+    if len(sys.argv) < 1:
         print("Error: Config files must be specified.")
-        print("a10_migration --config-file <filename> --a10-config-file <filename>")
+        print("a10_migration --config-file <filename>")
     logging.register_options(cfg.CONF)
-    cfg.CONF(args=sys.argv[2:]
+    cfg.CONF(args=sys.argv[1:]
              project='a10_migration',
              version='a10_migration 1.0')
     logging.set_defaults()
@@ -95,13 +100,30 @@ def main():
 
     if CONF.device_name:
         tenant_id = nlbaas_session.execute(
-            "SELECT tenant_id FROM a10_tenant_bindings WHERE "
-            "tenant_id = '{0}';".format(project_id))
-
+            "SELECT tenant_id FROM neutron.a10_tenant_bindings WHERE "
+            "device_name = :device_name; ",
+            {"device_name": CONF.device_name})
+        device_info_map[CONF.device_name] = CONF.device_name
     elif CONF.project_id:
         device_name = nlbaas_session.execute(
-            "SELECT tenant_id FROM a10_tenant_bindings WHERE "
-            "tenant_id = '{0}';".format(project_id))
+            "SELECT device_name FROM neutron.a10_tenant_bindings WHERE "
+            "tenant_id = :tenant_id ;", {"tenant_id": CONF.project_id})
+        device_info_map[device_name] = CONF.project_id
+    else:
+        tenant_bindings = nlbaas_session.execute(
+            "SELECT tenant_id, device_name FROM neutron.a10_tenant_bindings;").fetchall()
+    
+    a10_config = A10Config(config_dir=CONF.a10_config_path, provider="a10networks")
+
+    failure_count = 0
+    for device_name in device_info_map.keys()
+        device_info_map[device_name].update(a10_config.get_device(device_name))
+
+    if failure_count:
+        sys.exit(1)
+    
+    
+
 
 if __name__ == "__main__":
     main()
