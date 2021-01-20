@@ -35,11 +35,9 @@ cli_opts = [
                help='Migrate the Thunder with this name'),
     cfg.StrOpt('project_id',
                help='Migrate the Thunder bound to this tenant/project'),
-    cfg.StrOpt('a10-config-file')
 ]
 
 migration_opts = [
-    cf.
     cfg.BoolOpt('delete_after_migration', default=True,
                 help='Delete the load balancer records from neutron-lbaas'
                      ' after migration'),
@@ -67,13 +65,15 @@ def main():
         print("Error: Config files must be specified.")
         print("a10_migration --config-file <filename>")
     logging.register_options(cfg.CONF)
-    cfg.CONF(args=sys.argv[1:]
+    cfg.CONF(args=sys.argv[1:],
              project='a10_migration',
              version='a10_migration 1.0')
     logging.set_defaults()
     logging.setup(cfg.CONF, 'a10_migration')
     LOG = logging.getLogger('a10_migration')
     CONF.log_opt_values(LOG, logging.DEBUG)
+
+    import pdb; pdb.set_trace()
 
     if not CONF.all and not CONF.device_name and not CONF.project_id:
         print('Error: One of --all, --lb_id, or --project_id must be specified.')
@@ -84,13 +84,13 @@ def main():
         print('Error: Only one of --all, --device_name, or --project_id allowed.')
         return 1
     
-    nblaas_ctx_manager = enginefacade.transaction_context()
+    nlbaas_ctx_manager = enginefacade.transaction_context()
     nlbaas_ctx_manager.configure(connection=CONF.migration.a10_nlbaas_db_connection)
     nlbaas_session_maker = nlbaas_ctx_manager.writer.get_sessionmaker()
 
     octavia_context_manager = enginefacade.transaction_context()
     octavia_context_manager.configure(
-        connection=CONF.migration.octavia_db_connection)
+        connection=CONF.migration.a10_oct_connection)
     o_session_maker = octavia_context_manager.writer.get_sessionmaker()
 
     LOG.info('Starting migration.')
@@ -112,17 +112,16 @@ def main():
     else:
         tenant_bindings = nlbaas_session.execute(
             "SELECT tenant_id, device_name FROM neutron.a10_tenant_bindings;").fetchall()
+        tenant_bindings = dict(tenant_bindings)
     
     a10_config = A10Config(config_dir=CONF.a10_config_path, provider="a10networks")
 
     failure_count = 0
-    for device_name in device_info_map.keys()
+    for device_name in device_info_map.keys():
         device_info_map[device_name].update(a10_config.get_device(device_name))
 
     if failure_count:
         sys.exit(1)
-    
-    
 
 
 if __name__ == "__main__":

@@ -16,12 +16,10 @@
 # main octavia server. (Leave it as is if the database runs on this host.)
 
 # Octavia service account ID
-octavia_account_id = admin
+octavia_account_id =
 
 # Connection string for the neutron database
-a10_nlbaas_db_connection = mysql+pymysql://root:password@127.0.0.1/neutron?charset=utf8
+a10_nlbaas_db_connection =
 
 # Connection string for the octavia database
-a10_oct_connection = mysql+pymysql://root:password@10.64.3.134:3306/octavia
-
-a10_config_path = /etc/a10/config.py
+a10_oct_connection =
