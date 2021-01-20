@@ -21,6 +21,8 @@ from oslo_db.sqlalchemy import enginefacade
 import oslo_i18n as i18n
 from oslo_log import log as logging
 
+from a10_nlbaas2oct.a10_migration import a10_config as a10_cfg
+
 _translators = i18n.TranslatorFactory(domain='a10_migration')
 
 # The primary translation function using the well-known name "_"
@@ -73,8 +75,6 @@ def main():
     LOG = logging.getLogger('a10_migration')
     CONF.log_opt_values(LOG, logging.DEBUG)
 
-    import pdb; pdb.set_trace()
-
     if not CONF.all and not CONF.device_name and not CONF.project_id:
         print('Error: One of --all, --lb_id, or --project_id must be specified.')
         return 1
@@ -113,8 +113,13 @@ def main():
         tenant_bindings = nlbaas_session.execute(
             "SELECT tenant_id, device_name FROM neutron.a10_tenant_bindings;").fetchall()
         tenant_bindings = dict(tenant_bindings)
-    
-    a10_config = A10Config(config_dir=CONF.a10_config_path, provider="a10networks")
+        # This comes to us in the form {tenant_id: device_name} need to swap it around for later use
+        for k, v in tenant_bindings.items():
+            tenant_bindings[v] = {'tenant_id': k}
+            del tenant_bindings[k]
+        device_info_map.update(tenant_bindings)
+
+    a10_config = a10_cfg.A10Config(config_dir=CONF.migration.a10_config_path, provider="a10networks")
 
     failure_count = 0
     for device_name in device_info_map.keys():
