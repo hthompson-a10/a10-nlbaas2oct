@@ -20,6 +20,7 @@ from oslo_config import cfg
 from oslo_db.sqlalchemy import enginefacade
 import oslo_i18n as i18n
 from oslo_log import log as logging
+from oslo_utils import uuidutils
 
 from a10_nlbaas2oct.a10_migration import a10_config as a10_cfg
 
@@ -62,6 +63,59 @@ cfg.CONF.register_cli_opts(cli_opts)
 cfg.CONF.register_opts(migration_opts, group='migration')
 
 
+def get_loadbalancers_from_project_id(nlbaas_session, project_id):
+    lb_id_list = nlbaas_session.execute(
+        "SELECT id FROM neutron.lbaas_loadbalancers WHERE "
+        "project_id = :id AND provisioning_status = 'ACTIVE';",
+        {'id': project_id}).fetchall()
+    return lb_id_list
+
+
+def process_thunder_device(LOG, nlbaas_session, oct_session, loadbalancer_id, tenant_id, device_info):
+    LOG.debug('Migrating Thunder device %s', device_info['name'])
+
+    vthunder_id = uuidutils.generate_uuid()
+
+    if device_info['v_method'] == "LSI":
+        hierarchical_multitenancy = "disable"
+        partition_name = device_info['shared_partition']
+    elif device_info['v_method'] == "ADP":
+        hierarchical_multitenancy = "enable"
+        partition_name = tenant_id[0:13]
+    else:
+        #TODO: Provide custom exception
+        raise Exception()
+
+    # TODO: Execute function is borken due to column translate
+    result = oct_session.execute(
+        "INSERT INTO vthunders (vthunder_id, device_name, ip_address, username, "
+        "password, axapi_version, undercloud, loadbalancer_id, project_id, "
+        "topology, role, last_udp_update, status, created_at, updated_at, "
+        "partition_name, hierarchical_multitenancy) "
+        "VALUES (:vthunder_id, :device_name, :ip_address, :username, :password, "
+        ":axapi_version, :undercloud, :loadbalancer_id, :project_id, :topology, "
+        ":role, :last_udp_update, :status, :created_at, :updated_at, :partition_name, "
+        ":hierarchical_multitenancy);",
+        {'vthunder_id': vthunder_id,
+         'device_name': device_info['name'],
+         'ip_address': device_info['host'],
+         'username': device_info['username'],
+         'password': device_info['password'],
+         'axapi_version': device_info['api_version'],
+         'undercloud': 1,
+         'loadbalancer_id': loadbalancer_id,
+         'project_id': tenant_id,
+         'topology': "STANDALONE",
+         'role': "MASTER",
+         'status': "ACTIVE",
+         'last_udp_update': datetime.datetime.utcnow(),
+         'created_at': datetime.datetime.utcnow(),
+         'updated_at': datetime.datetime.utcnow(),
+         'partition_name': partition_name,
+         'hierarchical_multitenancy': hierarchical_multitenancy}
+    )
+    return result
+
 def main():
     if len(sys.argv) < 1:
         print("Error: Config files must be specified.")
@@ -96,6 +150,7 @@ def main():
     LOG.info('Starting migration.')
 
     nlbaas_session = nlbaas_session_maker(autocommit=True)
+    oct_session = o_session_maker(autocommit=False)
     device_info_map = {}
 
     if CONF.device_name:
@@ -112,18 +167,23 @@ def main():
     else:
         tenant_bindings = nlbaas_session.execute(
             "SELECT tenant_id, device_name FROM neutron.a10_tenant_bindings;").fetchall()
-        tenant_bindings = dict(tenant_bindings)
+        #tenant_bindings = dict(tenant_bindings)
         # This comes to us in the form {tenant_id: device_name} need to swap it around for later use
-        for k, v in tenant_bindings.items():
-            tenant_bindings[v] = {'tenant_id': k}
-            del tenant_bindings[k]
-        device_info_map.update(tenant_bindings)
+        #for k, v in tenant_bindings.items():
+        #    tenant_bindings[v] = {'tenant_id': k}
+        #    del tenant_bindings[k]
+        device_info_map.update(dict(tenant_bindings))
 
     a10_config = a10_cfg.A10Config(config_dir=CONF.migration.a10_config_path, provider="a10networks")
 
     failure_count = 0
-    for device_name in device_info_map.keys():
-        device_info_map[device_name].update(a10_config.get_device(device_name))
+    for tenant_id, device_name in device_info_map.items():
+        device_info = a10_config.get_device(device_name)
+        lb_id_list = get_loadbalancers_from_project_id(nlbaas_session, tenant_id)
+        for lb_id in lb_id_list:
+            process_thunder_device(LOG, nlbaas_session, oct_session,
+                                   tenant_id, lb_id, device_info)
+
 
     if failure_count:
         sys.exit(1)
