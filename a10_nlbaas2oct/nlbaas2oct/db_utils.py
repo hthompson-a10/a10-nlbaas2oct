@@ -33,13 +33,13 @@ def get_listeners_and_stats_by_lb(n_session, lb_id):
         "loadbalancer_id = :lb_id;", {'lb_id': lb_id}).fetchall()
     return listeners, lb_stats
 
-def get_SNIs_by_listener(listener_id):
+def get_SNIs_by_listener(n_session, listener_id):
     SNIs = n_session.execute(
         "SELECT tls_container_id, position FROM lbaas_sni WHERE "
         "listener_id = :listener_id;", {'listener_id': listener_id}).fetchall()
     return SNIs
 
-def get_l7policies_by_listner(listener_id):
+def get_l7policies_by_listener(n_session, listener_id):
     l7policies = n_session.execute(
         "SELECT id, name, description, listener_id, action, "
         "redirect_pool_id, redirect_url, position, "
@@ -49,13 +49,48 @@ def get_l7policies_by_listner(listener_id):
         {'listener_id': listener_id}).fetchall()
     return l7polcies
 
-def get_l7rules_by_l7policy(l7policy_id):
+def get_l7rules_by_l7policy(n_session, l7policy_id):
     l7rules = n_session.execute(
         "SELECT id, type, compare_type, invert, `key`, value, "
         "provisioning_status, admin_state_up FROM lbaas_l7rules WHERE "
         "l7policy_id = :l7policy_id AND provisioning_status = 'ACTIVE';",
         {'l7policy_id': l7policy_id}).fetchall()
     return l7rules
+
+def get_pool_entries_by_lb(n_session, lb_id)
+    pools = n_session.execute(
+        "SELECT id, name, description, protocol, lb_algorithm, "
+        "healthmonitor_id, admin_state_up, provisioning_status, "
+        "operating_status FROM lbaas_pools WHERE loadbalancer_id "
+        " = :lb_id;",
+        {'lb_id': lb_id}).fetchall()
+    return pools
+
+def get_sess_pers_by_pool(n_session, pool_id):
+    sp = n_session.execute(
+        "SELECT type, cookie_name FROM lbaas_sessionpersistences "
+        "WHERE pool_id = :pool_id;", {'pool_id': pool_id}).fetchone()
+    return sp
+
+def get_members_by_pool(n_session, pool_id):
+    members = n_session.execute(
+        "SELECT id, subnet_id, address, protocol_port, weight, "
+        "admin_state_up, provisioning_status, operating_status, name FROM "
+        "lbaas_members WHERE pool_id = :pool_id;",
+        {'pool_id': pool_id}).fetchall()
+    return members
+
+def get_healthmonitor(n_session, hm_id)
+    hm = n_session.execute(
+        "SELECT type, delay, timeout, max_retries, http_method, url_path, "
+        "expected_codes, admin_state_up, provisioning_status, name, "
+        "max_retries_down FROM lbaas_healthmonitors WHERE id = :hm_id AND "
+        "provisioning_status = 'ACTIVE';", {'hm_id': hm_id}).fetchone()
+
+    if hm is None:
+        raise Exception(_('Health monitor %s has invalid '
+                        'provisioning_status.'), hm_id)
+    return hm
 
 def cascade_delete_neutron_lb(n_session, lb_id):
     listeners = n_session.execute(

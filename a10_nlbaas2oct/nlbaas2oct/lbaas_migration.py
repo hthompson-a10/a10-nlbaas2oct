@@ -20,7 +20,7 @@ import oslo_i18n as i18n
 from oslo_log import log as logging
 
 
-def migrate_vip_ports(LOG, n_session, o_session, lb_id, n_lb, oct_accnt_id):
+def migrate_vip_ports(LOG, n_session, o_session, oct_accnt_id, lb_id, n_lb):
 
     # Migrate the port and security groups to Octavia
     vip_port = n_session.execute(
@@ -143,7 +143,7 @@ def migrate_listener(o_session, lb_id, n_lb, listener, lb_stats):
                         'in the Octavia database.'))
 
 
-def migrate_SNI(n_session, o_session, listener_id, SNI):
+def migrate_SNI(o_session, listener_id, SNI):
     # Create SNI containers
     result = o_session.execute(
         "INSERT INTO sni (listener_id, tls_container_id, position) VALUES "
@@ -155,7 +155,7 @@ def migrate_SNI(n_session, o_session, listener_id, SNI):
                         'database.'))
 
 
-def migrate_l7policy(o_session, listener_id, l7policy, project_id):
+def migrate_l7policy(o_session, project_id, listener_id, l7policy):
         # Create L7 Policies
         L7p_op_status = 'ONLINE' if l7policy[9] else 'OFFLINE'
         result = o_session.execute(
@@ -179,7 +179,7 @@ def migrate_l7policy(o_session, listener_id, l7policy, project_id):
                             'database.'))
 
 
-def migrate_l7rule(o_session, l7policy, project_id):
+def migrate_l7rule(o_session, project_id, l7policy, l7rule):
     # Create L7rule
     L7r_op_status = 'ONLINE' if l7rule[7] else 'OFFLINE
     result = o_session.execute(
@@ -201,52 +201,30 @@ def migrate_l7rule(o_session, l7policy, project_id):
         raise Exception(_('Unable to create L7 policy in the Octavia '
                         'database.'))
 
-def migrate_pools():
+def migrate_pools(o_session, lb_id, n_lb, pool):
     # Create pools
-    pools = n_session.execute(
-        "SELECT id, name, description, protocol, lb_algorithm, "
-        "healthmonitor_id, admin_state_up, provisioning_status, "
-        "operating_status FROM lbaas_pools WHERE loadbalancer_id "
-        " = :lb_id;",
-        {'lb_id': lb_id}).fetchall()
-    for pool in pools:
-        LOG.debug('Migrating pool: %s', pool[0]
-        if pool[7] == 'DELETED':
-            continue
-        elif pool[7] != 'ACTIVE':
-            raise Exception(_('Pool is invalid state of %s.'), pool[7]
-        result = o_session.execute(
-            "INSERT INTO pool (id, project_id, name, description, "
-            "protocol, lb_algorithm, operating_status, enabled, "
-            "load_balancer_id, created_at, updated_at, "
-            "provisioning_status) VALUES (:id, :project_id, :name, "
-            ":description, :protocol, :lb_algorithm, "
-            ":operating_status, :enabled, :load_balancer_id,"
-            ":created_at, :updated_at, :provisioning_status);",
-            {'id': pool[0], 'project_id': n_lb[1], 'name': pool[1],
-             'description': pool[2], 'protocol': pool[3],
-             'lb_algorithm': pool[4], 'operating_status': pool[8],
-             'enabled': pool[6], 'load_balancer_id': lb_id,
-             'created_at': datetime.datetime.utcnow(),
-             'updated_at': datetime.datetime.utcnow(),
-             'provisioning_status': pool[7]})
-        if result.rowcount != 1:
-            raise Exception(_('Unable to create pool in the '
-                            'Octavia database.')
+    result = o_session.execute(
+        "INSERT INTO pool (id, project_id, name, description, "
+        "protocol, lb_algorithm, operating_status, enabled, "
+        "load_balancer_id, created_at, updated_at, "
+        "provisioning_status) VALUES (:id, :project_id, :name, "
+        ":description, :protocol, :lb_algorithm, "
+        ":operating_status, :enabled, :load_balancer_id,"
+        ":created_at, :updated_at, :provisioning_status);",
+        {'id': pool[0], 'project_id': n_lb[1], 'name': pool[1],
+         'description': pool[2], 'protocol': pool[3],
+         'lb_algorithm': pool[4], 'operating_status': pool[8],
+         'enabled': pool[6], 'load_balancer_id': lb_id,
+         'created_at': datetime.datetime.utcnow(),
+         'updated_at': datetime.datetime.utcnow(),
+         'provisioning_status': pool[7]})
+    if result.rowcount != 1:
+        raise Exception(_('Unable to create pool in the '
+                        'Octavia database.')
 
 
-def migrate_health_monitor(LOG, n_session, o_session, project_id,
-                           pool_id, hm_id):
-    hm = n_session.execute(
-        "SELECT type, delay, timeout, max_retries, http_method, url_path, "
-        "expected_codes, admin_state_up, provisioning_status, name, "
-        "max_retries_down FROM lbaas_healthmonitors WHERE id = :hm_id AND "
-        "provisioning_status = 'ACTIVE';", {'hm_id': hm_id}).fetchone()
-    LOG.debug('Migrating health manager: %s', hm_id)
-
-    if hm is None:
-        raise Exception(_('Health monitor %s has invalid '
-                        'provisioning_status.'), hm_id)
+def migrate_health_monitor(o_session, project_id, pool_id, hm_id, hm):
+    # Create health monitor
 
     hm_op_status = 'ONLINE' if hm[7] else 'OFFLINE'
 
@@ -272,54 +250,34 @@ def migrate_health_monitor(LOG, n_session, o_session, project_id,
                         'database.'))
 
 
-def migrate_session_persistence(n_session, o_session, pool_id):
+def migrate_session_persistence(o_session, pool_id, sp):
     # Setup session persistence if it is configured
-    sp = n_session.execute(
-        "SELECT type, cookie_name FROM lbaas_sessionpersistences "
-        "WHERE pool_id = :pool_id;", {'pool_id': pool_id}).fetchone()
-    if sp:
-        result = o_session.execute(
-            "INSERT INTO session_persistence (pool_id, type, cookie_name) "
-            "VALUES (:pool_id, :type, :cookie_name);",
-            {'pool_id': pool_id, 'type': sp[0], 'cookie_name': sp[1]})
-        if result.rowcount != 1:
-            raise Exception(_('Unable to create session persistence in the '
-                            'Octavia database.'))
+    result = o_session.execute(
+        "INSERT INTO session_persistence (pool_id, type, cookie_name) "
+        "VALUES (:pool_id, :type, :cookie_name);",
+        {'pool_id': pool_id, 'type': sp[0], 'cookie_name': sp[1]})
+    if result.rowcount != 1:
+        raise Exception(_('Unable to create session persistence in the '
+                        'Octavia database.'))
 
 
-def migrate_members(LOG, n_session, o_session, project_id, pool_id):
-    # Handle members
-    members = n_session.execute(
-        "SELECT id, subnet_id, address, protocol_port, weight, "
-        "admin_state_up, provisioning_status, operating_status, name FROM "
-        "lbaas_members WHERE pool_id = :pool_id;",
-        {'pool_id': pool_id}).fetchall()
-    for member in members:
-        LOG.debug('Migrating member: %s', member[0])
-
-        if member[6] == 'DELETED':
-            continue
-        elif member[6] != 'ACTIVE':
-            raise Exception(_('Member %s for pool %s is invalid state of %s.'),
-                            member[0],
-                            pool_id,
-                            member[6])
-
-        result = o_session.execute(
-            "INSERT INTO member (id, pool_id, project_id, subnet_id, "
-            "ip_address, protocol_port, weight, operating_status, enabled, "
-            "created_at, updated_at, provisioning_status, name, backup) "
-            "VALUES (:id, :pool_id, :project_id, :subnet_id, :ip_address, "
-            ":protocol_port, :weight, :operating_status, :enabled, "
-            ":created_at, :updated_at, :provisioning_status, :name, :backup);",
-            {'id': member[0], 'pool_id': pool_id, 'project_id': project_id,
-             'subnet_id': member[1], 'ip_address': member[2],
-             'protocol_port': member[3], 'weight': member[4],
-             'operating_status': member[7], 'enabled': member[5],
-             'created_at': datetime.datetime.utcnow(),
-             'updated_at': datetime.datetime.utcnow(),
-             'provisioning_status': member[6], 'name': member[8],
-             'backup': False})
-        if result.rowcount != 1:
-            raise Exception(
-                _('Unable to create member in the Octavia database.'))
+def migrate_member(o_session, project_id, pool_id, member):
+    # Create member
+    result = o_session.execute(
+        "INSERT INTO member (id, pool_id, project_id, subnet_id, "
+        "ip_address, protocol_port, weight, operating_status, enabled, "
+        "created_at, updated_at, provisioning_status, name, backup) "
+        "VALUES (:id, :pool_id, :project_id, :subnet_id, :ip_address, "
+        ":protocol_port, :weight, :operating_status, :enabled, "
+        ":created_at, :updated_at, :provisioning_status, :name, :backup);",
+        {'id': member[0], 'pool_id': pool_id, 'project_id': project_id,
+         'subnet_id': member[1], 'ip_address': member[2],
+         'protocol_port': member[3], 'weight': member[4],
+         'operating_status': member[7], 'enabled': member[5],
+         'created_at': datetime.datetime.utcnow(),
+         'updated_at': datetime.datetime.utcnow(),
+         'provisioning_status': member[6], 'name': member[8],
+         'backup': False})
+    if result.rowcount != 1:
+        raise Exception(
+            _('Unable to create member in the Octavia database.'))
