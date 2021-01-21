@@ -21,11 +21,11 @@ CONF = cfg.CONF
 
 cli_opts = [
     cfg.BoolOpt('all', default=False,
-                help='Migrate all Thunders'),
-    cfg.StrOpt('device_name',
-               help='Migrate the Thunder with this name'),
+                help='Migrate all load balancers'),
+    cfg.StrOpt('lb_id',
+               help='Load balancer ID to migrate'),
     cfg.StrOpt('project_id',
-               help='Migrate the Thunder bound to this tenant/project'),
+               help='Migrate all load balancers owned by this project'),
 ]
 
 migration_opts = [
@@ -36,11 +36,17 @@ migration_opts = [
                 help='Run without making changes.'),
     cfg.StrOpt('octavia_account_id', required=True,
                help='The keystone account ID Octavia is running under.'),
-    cfg.StrOpt('a10_nlbaas_db_connection',
+    cfg.StrOpt('neutron_db_connection',
                required=True,
+               help='The neutron database connection string'),
+    cfg.StrOpt('octavia_db_connection',
+               required=True,
+               help='The octavia database connection string'),
+    cfg.StrOpt('a10_nlbaas_db_connection',
+               required=False,
                help='The a10 nlbaas database connection string'),
     cfg.StrOpt('a10_oct_connection',
-               required=True,
+               required=False,
                help='The a10 octavia database connection string'),
     cfg.StrOpt('a10_config_path',
                required=True,
@@ -73,6 +79,8 @@ def main():
             (CONF.lb_id and CONF.project_id)):
         print('Error: Only one of --all, --lb_id, --project_id allowed.')
         return 1
+
+    # TODO: IF a10 dbs not specified then default to lbaas dbs
 
     neutron_context_manager = enginefacade.transaction_context()
     neutron_context_manager.configure(
@@ -113,69 +121,104 @@ def main():
     # Migrate the loadbalancers and their child objects
     failure_count = 0
     for lb_id in lb_id_list:
-        # TODO: Preform a lookup of the associated device and cache it's name 
-        # and associated tenant_id
-        lock_loadbalancer(lb_id[0])
-        #device_info = a10_config.get_device(device_name)
-        #migrate_thunder(LOG, n_session_maker, o_session_maker, lb_id[0],
-                        #tenant_id, device_info)
-        n_lb = get_loadbalancery_entry()
-        migrate_ports()
-        migrate_lb(LOG, lb_id[0])
-        migrate_vip()
+        try:
+            lb_id = lb_id[0]
+            # TODO: Preform a lookup of the associated device and cache it's name 
+            # and associated tenant_id
+            LOG.info('Locking load balancer: %s', lb_id)
+            lock_loadbalancer(lb_id)
+            #device_info = a10_config.get_device(device_name)
+            #migrate_thunder(LOG, n_session_maker, o_session_maker, lb_id[0],
+                            #tenant_id, device_info)
 
-        # Start listener migration
-        listeners = get_listeners_by_lb()
-        for listener in listeners:
-            if listener[8] == 'DELETED':
+            n_lb = get_loadbalancery_entry(n_session, lb_id)
+            if n_lb[0] != 'a10networks':
+                LOG.info('Skipping loadbalancer with provider %s. Not an A10 Networks LB', n_lb[0])
                 continue
-            elif listener[8] != 'ACTIVE':
-                raise Exception(_('Listener is invalid state of %s.'),
-                                 listener[8])
-            migrate_listener()
-            # Handle SNI certs
-            migrate_SNI(n_session, o_session, listener[0])
 
-            # Handle L7 policy records
-            migrate_L7policies(LOG, n_session, o_session,
-                               listener[0], n_lb[1])
-        
-        # Start pool migration
-        pools = get_pool_entries_by_lb()
-        for pool in pools:
-            migrate_pool()
-            if pool[5] is not None:
-                migrate_health_monitor(LOG, n_session, o_session,
-                                       n_lb[1], pool[0], pool[5])
-                # Handle the session persistence records
-                migrate_session_persistence(n_session, o_session, pool[0])
-                # Handle the pool memebers
-                migrate_members(LOG, n_session, o_session, n_lb[1], pool[0])
-        
+            LOG.info('Migrating VIP port for load balancer: %s', lb_id)
+            migrate_vip_ports(n_session, o_session, lb_id, n_lb,
+                              CONF.migration.octavia_account_id)
+            
+            LOG.info('Migrating load balancer: %s', lb_id)
+            migrate_lb(o_session, lb_id, n_lb)
 
-        # Delete the old neutron-lbaas records
-        if (CONF.migration.delete_after_migration and not
-                CONF.migration.trial_run):
-            cascade_delete_neutron_lb(n_session, lb_id)
+            LOG.info('Migrating VIP for load balancer: %s', lb_id)
+            migrate_vip(n_session, o_session, lb_id, n_lb)
 
-        if CONF.migration.trial_run:
-            o_session.rollback()
+            # Start listener migration
+            listeners, lb_stats = get_listeners_and_stats_by_lb(n_session, lb_id)
+            for listener in listeners:
+                LOG.debug('Migrating listener: %s', listener[0])
+                if listener[8] == 'DELETED':
+                    continue
+                elif listener[8] != 'ACTIVE':
+                    raise Exception(_('Listener is invalid state of %s.'),
+                                     listener[8])
+                migrate_listener(o_session, lb_id, n_lb, listener, lb_stats)
+
+                # Handle SNI certs
+                SNIs = get_SNIs_by_listener(listener_id)
+                for SNI in SNIs:
+                    LOG.debug('Migrating SNI: %s', SNI[0])
+                    migrate_SNI(n_session, o_session, listener[0], SNI)
+
+                # Handle L7 policy records
+                l7policies = get_l7policies_by_listner(listener[0])
+                for l7policy in l7policies:
+                    LOG.debug('Migrating L7 policy: %s', l7policy[0])
+                    if l7policy[8] == 'DELETED':
+                        continue
+                    elif l7policy[8] != 'ACTIVE':
+                        raise Exception(_('L7 policy is invalid state of %s.'),
+                                        l7policy[8])                    
+                    migrate_l7policy(LOG, n_session, o_session,
+                                       listener[0], l7_policy, n_lb[1])
+                    l7rules = get_l7rules_by_l7policy(l7policy[0])
+                    for l7rule in l7rules:
+                        LOG.debug('Migrating L7 rule: %s', l7policy[0])
+                        if l7rule[6] == 'DELETED':
+                            continue
+                        elif l7rule[6] != 'ACTIVE':
+                            raise Exception(_('L7 rule is invalid state of %s.'),
+                                            l7rule[6])
+                        migrate_l7rule(o_session, l7_policy, l7rule, n_lb[1])              
+
+            # Start pool migration
+            pools = get_pool_entries_by_lb()
+            for pool in pools:
+                migrate_pool()
+                if pool[5] is not None:
+                    migrate_health_monitor(LOG, n_session, o_session,
+                                           n_lb[1], pool[0], pool[5])
+                    # Handle the session persistence records
+                    migrate_session_persistence(n_session, o_session, pool[0])
+                    # Handle the pool memebers
+                    migrate_members(LOG, n_session, o_session, n_lb[1], pool[0])
+
+
+            # Delete the old neutron-lbaas records
+            if (CONF.migration.delete_after_migration and not
+                    CONF.migration.trial_run):
+                cascade_delete_neutron_lb(n_session, lb_id)
+            if CONF.migration.trial_run:
+                o_session.rollback()
+                n_session.rollback()
+                LOG.info('Simulated migration of load balancer %s successful.',
+                         lb_id)
+            else:
+                o_session.commit()
+                n_session.commit()
+                LOG.info('Migration of load balancer %s successful.', lb_id)
+        except Exception as e:
             n_session.rollback()
-            LOG.info('Simulated migration of load balancer %s successful.',
-                     lb_id)
-        else:
-            o_session.commit()
-            n_session.commit()
-            LOG.info('Migration of load balancer %s successful.', lb_id)
-        return 0
-    except Exception as e:
-        n_session.rollback()
-        o_session.rollback()
-        LOG.exception("Skipping load balancer %s due to: %s.", lb_id, str(e))
-        return 1
+            o_session.rollback()
+            LOG.exception("Skipping load balancer %s due to: %s.", lb_id, str(e))
+            failure_count += 1
 
 
     if failure_count:
+        LOG.warning("%d failures were detected", failure_count)
         sys.exit(1)
 
 if __name__ == "__main__":
