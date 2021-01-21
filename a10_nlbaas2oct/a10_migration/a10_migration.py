@@ -63,6 +63,14 @@ cfg.CONF.register_cli_opts(cli_opts)
 cfg.CONF.register_opts(migration_opts, group='migration')
 
 
+class IncorrectPartitionTypeException(Exception):
+
+    def __init__(self, v_method):
+        self.message = ("v_method of type {} was specified, "
+                       "but only \"LSI\" or \"ADP\" are supported")
+        super().__init__(self.message.format(v_method))
+
+
 def get_loadbalancers_from_project_id(nlbaas_session, project_id):
     lb_id_list = nlbaas_session.execute(
         "SELECT id FROM neutron.lbaas_loadbalancers WHERE "
@@ -83,10 +91,8 @@ def process_thunder_device(LOG, nlbaas_session, oct_session, loadbalancer_id, te
         hierarchical_multitenancy = "enable"
         partition_name = tenant_id[0:13]
     else:
-        #TODO: Provide custom exception
-        raise Exception()
+        raise IncorrectPartitionTypeException(device_info['v_method'])
 
-    # TODO: Execute function is borken due to column translate
     result = oct_session.execute(
         "INSERT INTO vthunders (vthunder_id, device_name, ip_address, username, "
         "password, axapi_version, undercloud, loadbalancer_id, project_id, "
@@ -114,6 +120,7 @@ def process_thunder_device(LOG, nlbaas_session, oct_session, loadbalancer_id, te
          'partition_name': partition_name,
          'hierarchical_multitenancy': hierarchical_multitenancy}
     )
+
     return result
 
 def main():
@@ -150,7 +157,7 @@ def main():
     LOG.info('Starting migration.')
 
     nlbaas_session = nlbaas_session_maker(autocommit=True)
-    oct_session = o_session_maker(autocommit=False)
+    oct_session = o_session_maker(autocommit=True)
     device_info_map = {}
 
     if CONF.device_name:
@@ -181,8 +188,8 @@ def main():
         device_info = a10_config.get_device(device_name)
         lb_id_list = get_loadbalancers_from_project_id(nlbaas_session, tenant_id)
         for lb_id in lb_id_list:
-            process_thunder_device(LOG, nlbaas_session, oct_session,
-                                   tenant_id, lb_id, device_info)
+            # lb_id is a RowType object. A tuple with a single value.
+            process_thunder_device(LOG, nlbaas_session, oct_session, lb_id[0], tenant_id, device_info)
 
 
     if failure_count:
