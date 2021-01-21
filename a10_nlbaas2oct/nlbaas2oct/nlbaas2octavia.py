@@ -123,7 +123,7 @@ def cascade_delete_neutron_lb(n_session, lb_id):
         "DELETE FROM lbaas_loadbalancers WHERE id = :lb_id;", {'lb_id': lb_id})
 
 
-def process_health_monitor(LOG, n_session, o_session, project_id,
+def migrate_health_monitor(LOG, n_session, o_session, project_id,
                            pool_id, hm_id):
     hm = n_session.execute(
         "SELECT type, delay, timeout, max_retries, http_method, url_path, "
@@ -160,7 +160,7 @@ def process_health_monitor(LOG, n_session, o_session, project_id,
                         'database.'))
 
 
-def process_session_persistence(n_session, o_session, pool_id):
+def migrate_session_persistence(n_session, o_session, pool_id):
     # Setup session persistence if it is configured
     sp = n_session.execute(
         "SELECT type, cookie_name FROM lbaas_sessionpersistences "
@@ -175,7 +175,7 @@ def process_session_persistence(n_session, o_session, pool_id):
                             'Octavia database.'))
 
 
-def process_members(LOG, n_session, o_session, project_id, pool_id):
+def migrate_members(LOG, n_session, o_session, project_id, pool_id):
     # Handle members
     members = n_session.execute(
         "SELECT id, subnet_id, address, protocol_port, weight, "
@@ -213,7 +213,7 @@ def process_members(LOG, n_session, o_session, project_id, pool_id):
                 _('Unable to create member in the Octavia database.'))
 
 
-def process_SNI(n_session, o_session, listener_id):
+def migrate_SNI(n_session, o_session, listener_id):
     SNIs = n_session.execute(
         "SELECT tls_container_id, position FROM lbaas_sni WHERE "
         "listener_id = :listener_id;", {'listener_id': listener_id}).fetchall()
@@ -228,7 +228,7 @@ def process_SNI(n_session, o_session, listener_id):
                             'database.'))
 
 
-def process_L7policies(LOG, n_session, o_session, listener_id, project_id):
+def migrate_L7policies(LOG, n_session, o_session, listener_id, project_id):
     l7policies = n_session.execute(
         "SELECT id, name, description, listener_id, action, "
         "redirect_pool_id, redirect_url, position, "
@@ -303,65 +303,82 @@ def process_L7policies(LOG, n_session, o_session, listener_id, project_id):
                                 'database.'))
 
 
-def migrate_lb(LOG, n_session_maker, o_session_maker, lb_id):
+def migrate_ports(LOG, n_session, o_session):
+    LOG.info('Migrating VIP for lb: %s', lb_id)
 
-    n_session = n_session_maker(autocommit=False)
-    o_session = o_session_maker(autocommit=False)
-
-    LOG.info('Migrating load balancer: %s', lb_id)
-    try:
-        # Lock the load balancer in neutron DB
+    # Migrate the port and security groups to Octavia
+    vip_port = n_session.execute(
+        "SELECT a.device_owner, a.project_id, b.security_group_id "
+        "FROM ports a JOIN securitygroupportbindings b ON "
+        "a.id = b.port_id  where id = :id;",
+        {'id': n_lb[7]}).fetchone()
+    # neutron-lbaas does not support user VIP ports, so take
+    # ownership of the port and security group
+    if vip_port[0] == 'neutron:LOADBALANCERV2':
         result = n_session.execute(
-            "UPDATE lbaas_loadbalancers SET "
-            "provisioning_status = 'PENDING_UPDATE' WHERE id = :id AND "
-            "provisioning_status = 'ACTIVE';", {'id': lb_id})
+            "UPDATE ports SET device_owner = 'Octavia', "
+            "project_id = :proj_id WHERE "
+            "id = :id;", {'id': n_lb[7],
+                          'proj_id': CONF.migration.octavia_account_id})
         if result.rowcount != 1:
-            raise Exception(_('Load balancer is not provisioning_status '
-                            'ACTIVE'))
-
-        # Get the load balancer record from neutron
-        n_lb = n_session.execute(
-            "SELECT b.provider_name, a.project_id, a.name, a.description, "
-            "a.admin_state_up, a.operating_status, a.flavor_id, "
-            "a.vip_port_id, a.vip_subnet_id, a.vip_address "
-            "FROM lbaas_loadbalancers a JOIN providerresourceassociations b "
-            "ON a.id = b.resource_id WHERE ID = :id;",
-            {'id': lb_id}).fetchone()
-
-        # Migrate the port and security groups to Octavia
-        vip_port = n_session.execute(
-            "SELECT a.device_owner, a.project_id, b.security_group_id "
-            "FROM ports a JOIN securitygroupportbindings b ON "
-            "a.id = b.port_id  where id = :id;",
-            {'id': n_lb[7]}).fetchone()
-
-        # neutron-lbaas does not support user VIP ports, so take
-        # ownership of the port and security group
-        if vip_port[0] == 'neutron:LOADBALANCERV2':
+            raise Exception(_('Unable to update VIP port in the neutron '
+                            'database.'))
+        security_group = n_session.execute(
+            "SELECT project_id FROM securitygroups WHERE id = :id",
+            {'id': vip_port[2]}).fetchone()
+        # Update security group project, only when its owner is not the
+        # user project, which means that Octavia should own it
+        if security_group[0] != n_lb[1]:
             result = n_session.execute(
-                "UPDATE ports SET device_owner = 'Octavia', "
-                "project_id = :proj_id WHERE "
-                "id = :id;", {'id': n_lb[7],
-                              'proj_id': CONF.migration.octavia_account_id})
+                "UPDATE securitygroups SET project_id = :proj_id WHERE "
+                "id = :id;", {'proj_id': CONF.migration.octavia_account_id,
+                              'id': vip_port[2]})
             if result.rowcount != 1:
-                raise Exception(_('Unable to update VIP port in the neutron '
-                                'database.'))
-            security_group = n_session.execute(
-                "SELECT project_id FROM securitygroups WHERE id = :id",
-                {'id': vip_port[2]}).fetchone()
+                raise Exception(_('Unable to update VIP security group in '
+                                  'the neutron database.'))
 
-            # Update security group project, only when its owner is not the
-            # user project, which means that Octavia should own it
-            if security_group[0] != n_lb[1]:
-                result = n_session.execute(
-                    "UPDATE securitygroups SET project_id = :proj_id WHERE "
-                    "id = :id;", {'proj_id': CONF.migration.octavia_account_id,
-                                  'id': vip_port[2]})
-                if result.rowcount != 1:
-                    raise Exception(_('Unable to update VIP security group in '
-                                      'the neutron database.'))
+def migrate_vip(n_session, o_session, n_lb, lb_id):
+    # Get the network ID for the VIP
+    subnet = n_session.execute(
+        "SELECT network_id FROM subnets WHERE id = :id;",
+        {'id': n_lb[8]}).fetchone(
+    # Create VIP record
+    result = o_session.execute(
+        "INSERT INTO vip (load_balancer_id, ip_address, port_id, "
+        "subnet_id, network_id) VALUES (:lb_id, :ip_address, "
+        ":port_id, :subnet_id, :network_id);",
+        {'lb_id': lb_id, 'ip_address': n_lb[9], 'port_id': n_lb[7],
+         'subnet_id': n_lb[8], 'network_id': subnet[0]})
+    if result.rowcount != 1:
+        raise Exception(_('Unable to create VIP in the Octavia '
+                        'database.'))
 
-        # Octavia driver load balancers are now done, next process the other
+def lock_loadbalancer(n_session, lb_id):
+    # Lock the load balancer in neutron DB
+    result = n_session.execute(
+        "UPDATE lbaas_loadbalancers SET "
+        "provisioning_status = 'PENDING_UPDATE' WHERE id = :id AND "
+        "provisioning_status = 'ACTIVE';", {'id': lb_id})
+    if result.rowcount != 1:
+        raise Exception(_('Load balancer is not provisioning_status '
+                        'ACTIVE'))
+
+def get_loadbalancery_entry(n_session, lb_id):
+    # Get the load balancer record from neutron
+    n_lb = n_session.execute(
+        "SELECT b.provider_name, a.project_id, a.name, a.description, "
+        "a.admin_state_up, a.operating_status, a.flavor_id, "
+        "a.vip_port_id, a.vip_subnet_id, a.vip_address "
+        "FROM lbaas_loadbalancers a JOIN providerresourceassociations b "
+        "ON a.id = b.resource_id WHERE ID = :id;",
+        {'id': lb_id}).fetchone()
+    return n_lb
+
+def migrate_lb(LOG, n_session, o_session, lb_id, n_lb):
+    LOG.info('Migrating load balancer: %s', lb_id)
+
+    try:
+        # Octavia driver load balancers are now done, next migrate the other
         # provider driver load balancers
         if n_lb[0] != 'octavia':
             # Create the load balancer
@@ -382,21 +399,6 @@ def migrate_lb(LOG, n_session_maker, o_session_maker, lb_id):
                 raise Exception(_('Unable to create load balancer in the '
                                 'Octavia database.'))
 
-            # Get the network ID for the VIP
-            subnet = n_session.execute(
-                "SELECT network_id FROM subnets WHERE id = :id;",
-                {'id': n_lb[8]}).fetchone()
-
-            # Create VIP record
-            result = o_session.execute(
-                "INSERT INTO vip (load_balancer_id, ip_address, port_id, "
-                "subnet_id, network_id) VALUES (:lb_id, :ip_address, "
-                ":port_id, :subnet_id, :network_id);",
-                {'lb_id': lb_id, 'ip_address': n_lb[9], 'port_id': n_lb[7],
-                 'subnet_id': n_lb[8], 'network_id': subnet[0]})
-            if result.rowcount != 1:
-                raise Exception(_('Unable to create VIP in the Octavia '
-                                'database.'))
 
             # Create pools
             pools = n_session.execute(
@@ -434,14 +436,14 @@ def migrate_lb(LOG, n_session_maker, o_session_maker, lb_id):
 
                 # Create health monitor if there is one
                 if pool[5] is not None:
-                    process_health_monitor(LOG, n_session, o_session,
+                    migrate_health_monitor(LOG, n_session, o_session,
                                            n_lb[1], pool[0], pool[5])
 
                 # Handle the session persistence records
-                process_session_persistence(n_session, o_session, pool[0])
+                migrate_session_persistence(n_session, o_session, pool[0])
 
                 # Handle the pool memebers
-                process_members(LOG, n_session, o_session, n_lb[1], pool[0])
+                migrate_members(LOG, n_session, o_session, n_lb[1], pool[0])
 
             lb_stats = n_session.execute(
                 "SELECT bytes_in, bytes_out, active_connections, "
@@ -508,10 +510,10 @@ def migrate_lb(LOG, n_session_maker, o_session_maker, lb_id):
                                     'in the Octavia database.'))
 
                 # Handle SNI certs
-                process_SNI(n_session, o_session, listener[0])
+                migrate_SNI(n_session, o_session, listener[0])
 
                 # Handle L7 policy records
-                process_L7policies(LOG, n_session, o_session,
+                migrate_L7policies(LOG, n_session, o_session,
                                    listener[0], n_lb[1])
 
         # Delete the old neutron-lbaas records
@@ -534,64 +536,3 @@ def migrate_lb(LOG, n_session_maker, o_session_maker, lb_id):
         o_session.rollback()
         LOG.exception("Skipping load balancer %s due to: %s.", lb_id, str(e))
         return 1
-
-
-def main():
-    if len(sys.argv) == 1:
-        print('Error: Config file must be specified.')
-        print('nlbaas2octavia --config-file <filename>')
-        return 1
-    logging.register_options(cfg.CONF)
-    cfg.CONF(args=sys.argv[1:],
-             project='nlbaas2octavia',
-             version='nlbaas2octavia 1.0')
-    logging.set_defaults()
-    logging.setup(cfg.CONF, 'nlbaas2octavia')
-    LOG = logging.getLogger('nlbaas2octavia')
-    CONF.log_opt_values(LOG, logging.DEBUG)
-
-    if not CONF.all and not CONF.lb_id and not CONF.project_id:
-        print('Error: One of --all, --lb_id, --project_id must be specified.')
-        return 1
-
-    if ((CONF.all and (CONF.lb_id or CONF.project_id)) or
-            (CONF.lb_id and CONF.project_id)):
-        print('Error: Only one of --all, --lb_id, --project_id allowed.')
-        return 1
-
-    neutron_context_manager = enginefacade.transaction_context()
-    neutron_context_manager.configure(
-        connection=CONF.migration.neutron_db_connection)
-    n_session_maker = neutron_context_manager.writer.get_sessionmaker()
-
-    octavia_context_manager = enginefacade.transaction_context()
-    octavia_context_manager.configure(
-        connection=CONF.migration.octavia_db_connection)
-    o_session_maker = octavia_context_manager.writer.get_sessionmaker()
-
-    LOG.info('Starting migration.')
-
-    n_session = n_session_maker(autocommit=True)
-    lb_id_list = []
-
-    if CONF.lb_id:
-        lb_id_list = [[CONF.lb_id]]
-    elif CONF.project_id:
-        lb_id_list = n_session.execute(
-            "SELECT id FROM neutron.lbaas_loadbalancers WHERE "
-            "project_id = :id AND provisioning_status = 'ACTIVE';",
-            {'id': CONF.project_id}).fetchall()
-    else:  # CONF.ALL
-        lb_id_list = n_session.execute(
-            "SELECT id FROM neutron.lbaas_loadbalancers WHERE "
-            "provisioning_status = 'ACTIVE';").fetchall()
-
-    failure_count = 0
-    for lb in lb_id_list:
-        failure_count += migrate_lb(LOG, n_session_maker,
-                                    o_session_maker, lb[0])
-    if failure_count:
-        sys.exit(1)
-
-if __name__ == "__main__":
-    main()
