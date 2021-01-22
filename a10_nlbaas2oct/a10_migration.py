@@ -17,7 +17,7 @@
 import oslo_i18n as i18n
 from oslo_utils import uuidutils
 
-_translators = i18n.TranslatorFactory(domain='a10_migration')
+_translators = i18n.TranslatorFactory(domain='a10_nlbaas2oct')
 
 # The primary translation function using the well-known name "_"
 _ = _translators.primary

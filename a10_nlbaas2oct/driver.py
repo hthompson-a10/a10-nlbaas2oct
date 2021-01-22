@@ -23,7 +23,7 @@ from a10_nlbaas2oct import a10_migration as aten2oct
 from a10_nlbaas2oct import db_utils
 from a10_nlbaas2oct import lbaas_migration as lb2oct
 
-_translators = i18n.TranslatorFactory(domain='a10_migration')
+_translators = i18n.TranslatorFactory(domain='a10_nlbaas2oct')
 
 # The primary translation function using the well-known name "_"
 _ = _translators.primary
