@@ -36,12 +36,12 @@ def get_loadbalancer_ids(n_session, conf_lb_id=None, conf_project_id=None):
     if conf_lb_id:
         lb_id_list = [[conf_lb_id]]
     elif conf_project_id:
-        lb_id_list = nlbaas_session.execute(
+        lb_id_list = n_session.execute(
             "SELECT id FROM neutron.lbaas_loadbalancers WHERE "
             "project_id = :id AND provisioning_status = 'ACTIVE';",
             {'id': conf_project_id}).fetchall()
     else:  # CONF.ALL
-        lb_id_list = nlbaas_session.execute(
+        lb_id_list = n_session.execute(
             "SELECT id FROM neutron.lbaas_loadbalancers WHERE "
             "provisioning_status = 'ACTIVE';").fetchall()
     return lb_id_list
@@ -95,7 +95,7 @@ def get_l7rules_by_l7policy(n_session, l7policy_id):
         {'l7policy_id': l7policy_id}).fetchall()
     return l7rules
 
-def get_pool_entries_by_lb(n_session, lb_id)
+def get_pool_entries_by_lb(n_session, lb_id):
     pools = n_session.execute(
         "SELECT id, name, description, protocol, lb_algorithm, "
         "healthmonitor_id, admin_state_up, provisioning_status, "
@@ -118,7 +118,7 @@ def get_members_by_pool(n_session, pool_id):
         {'pool_id': pool_id}).fetchall()
     return members
 
-def get_healthmonitor(n_session, hm_id)
+def get_healthmonitor(n_session, hm_id):
     hm = n_session.execute(
         "SELECT type, delay, timeout, max_retries, http_method, url_path, "
         "expected_codes, admin_state_up, provisioning_status, name, "

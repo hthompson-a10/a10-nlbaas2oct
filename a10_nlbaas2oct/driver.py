@@ -12,6 +12,8 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
+import sys
+
 from oslo_config import cfg
 from oslo_db.sqlalchemy import enginefacade
 import oslo_i18n as i18n
@@ -136,7 +138,7 @@ def main():
             # TODO: Preform a lookup of the associated device and cache it's name 
             # and associated tenant_id
             LOG.info('Locking load balancer: %s', lb_id)
-            db_utils.lock_loadbalancer(lb_id)
+            db_utils.lock_loadbalancer(n_session, lb_id)
 
             n_lb = db_utils.get_loadbalancer_entry(n_session, lb_id)
             if n_lb[0] != 'a10networks':
@@ -144,12 +146,12 @@ def main():
                 continue
 
             device_name = aten2oct.get_device_name_by_tenant(a10_nlbaas_session, n_lb[1])
-            LOG.debug('Migrating Thunder device: %s', device_info['name'])
+            LOG.debug('Migrating Thunder device: %s', device_name)
             device_info = a10_config.get_device(device_name)
-            aten2oct.migrate_thunder(a10_oct_session, lb_id[0], tenant_id, device_info)
+            aten2oct.migrate_thunder(a10_oct_session, lb_id, n_lb[0], device_info)
 
             LOG.info('Migrating VIP port for load balancer: %s', lb_id)
-            lb2oct.migrate_vip_ports(n_session, o_session, CONF.migration.octavia_account_id, lb_id, n_lb)
+            lb2oct.migrate_vip_ports(n_session, CONF.migration.octavia_account_id, lb_id, n_lb)
             
             LOG.info('Migrating load balancer: %s', lb_id)
             lb2oct.migrate_lb(o_session, lb_id, n_lb)
@@ -199,11 +201,11 @@ def main():
             # Start pool migration
             pools = db_utils.get_pool_entries_by_lb(n_session, lb_id)
             for pool in pools:
-                LOG.debug('Migrating pool: %s', pool[0]
+                LOG.debug('Migrating pool: %s', pool[0])
                 if pool[7] == 'DELETED':
                     continue
                 elif pool[7] != 'ACTIVE':
-                    raise Exception(_('Pool is invalid state of %s.'), pool[7]
+                    raise Exception(_('Pool is invalid state of %s.'), pool[7])
                 lb2oct.migrate_pool(o_session, lb_id, n_lb, pool)
 
                 hm_id = pool[5]

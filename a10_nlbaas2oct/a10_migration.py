@@ -13,6 +13,7 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
+import datetime
 
 import oslo_i18n as i18n
 from oslo_utils import uuidutils
@@ -33,10 +34,10 @@ class IncorrectPartitionTypeException(Exception):
 
 
 def get_device_name_by_tenant(a10_nlbaas_session, tenant_id):
-    device_name = n_session.execute(
+    device_name = a10_nlbaas_session.execute(
         "SELECT device_name FROM neutron.a10_tenant_bindings WHERE "
         "tenant_id = :tenant_id ;", {"tenant_id": tenant_id}).fetchone()
-    return device_name
+    return device_name[0]
 
 
 def migrate_thunder(a10_oct_session, loadbalancer_id, tenant_id, device_info):
@@ -53,7 +54,7 @@ def migrate_thunder(a10_oct_session, loadbalancer_id, tenant_id, device_info):
     else:
         raise IncorrectPartitionTypeException(device_info['v_method'])
 
-    result = o_session.execute(
+    result = a10_oct_session.execute(
         "INSERT INTO vthunders (vthunder_id, device_name, ip_address, username, "
         "password, axapi_version, undercloud, loadbalancer_id, project_id, "
         "topology, role, last_udp_update, status, created_at, updated_at, "
@@ -80,6 +81,5 @@ def migrate_thunder(a10_oct_session, loadbalancer_id, tenant_id, device_info):
          'partition_name': partition_name,
          'hierarchical_multitenancy': hierarchical_multitenancy}
         )
-        if result.rowcount != 1:
-          raise Exception(_('Unable to create Thunder in the A10 Octavia database.'))
-
+    if result.rowcount != 1:
+        raise Exception(_('Unable to create Thunder in the A10 Octavia database.'))

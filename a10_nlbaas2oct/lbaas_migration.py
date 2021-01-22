@@ -20,7 +20,7 @@ import oslo_i18n as i18n
 from oslo_log import log as logging
 
 
-def migrate_vip_ports(LOG, n_session, o_session, oct_accnt_id, lb_id, n_lb):
+def migrate_vip_ports(n_session, oct_accnt_id, lb_id, n_lb):
 
     # Migrate the port and security groups to Octavia
     vip_port = n_session.execute(
@@ -83,7 +83,7 @@ def migrate_vip(n_session, o_session, lb_id, n_lb):
     # Get the network ID for the VIP
     subnet = n_session.execute(
         "SELECT network_id FROM subnets WHERE id = :id;",
-        {'id': n_lb[8]}).fetchone(
+        {'id': n_lb[8]}).fetchone()
     # Create VIP record
     result = o_session.execute(
         "INSERT INTO vip (load_balancer_id, ip_address, port_id, "
@@ -122,7 +122,7 @@ def migrate_listener(o_session, lb_id, n_lb, listener, lb_stats):
          'updated_at': datetime.datetime.utcnow()})
     if result.rowcount != 1:
         raise Exception(_('Unable to create listener in the '
-                        'Octavia database.'
+                        'Octavia database.'))
     # Convert load balancer stats to listener stats
     # This conversion may error on the low side due to
     # the division
@@ -181,7 +181,7 @@ def migrate_l7policy(o_session, project_id, listener_id, l7policy):
 
 def migrate_l7rule(o_session, project_id, l7policy, l7rule):
     # Create L7rule
-    L7r_op_status = 'ONLINE' if l7rule[7] else 'OFFLINE
+    L7r_op_status = 'ONLINE' if l7rule[7] else 'OFFLINE'
     result = o_session.execute(
         "INSERT INTO l7rule (id, l7policy_id, type, compare_type, "
         "`key`, value, invert, provisioning_status, created_at, "
@@ -220,7 +220,7 @@ def migrate_pools(o_session, lb_id, n_lb, pool):
          'provisioning_status': pool[7]})
     if result.rowcount != 1:
         raise Exception(_('Unable to create pool in the '
-                        'Octavia database.')
+                        'Octavia database.'))
 
 
 def migrate_health_monitor(o_session, project_id, pool_id, hm_id, hm):
