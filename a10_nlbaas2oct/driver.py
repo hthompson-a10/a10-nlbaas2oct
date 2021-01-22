@@ -132,6 +132,7 @@ def main():
     failure_count = 0
     lb_id_list = db_utils.get_loadbalancer_ids(n_session, conf_lb_id=CONF.lb_id,
                                                conf_project_id=CONF.project_id)
+    tenant_bindings_to_delete = []
     for lb_id in lb_id_list:
         try:
             lb_id = lb_id[0]
@@ -148,7 +149,12 @@ def main():
             device_name = aten2oct.get_device_name_by_tenant(a10_nlbaas_session, n_lb[1])
             LOG.debug('Migrating Thunder device: %s', device_name)
             device_info = a10_config.get_device(device_name)
-            aten2oct.migrate_thunder(a10_oct_session, lb_id, n_lb[0], device_info)
+            try:
+                aten2oct.migrate_thunder(a10_oct_session, lb_id, n_lb[0], device_info)
+            except aten2oct.UnsupportedAXAPIVersionException as e:
+                LOG.warning('Skipping loadbalancer %s for device %s with AXAPI version %s. '
+                            'Only AXAPI version 3.0 is supported.',
+                            lb_id, device_name, e.axapi_version)
 
             LOG.info('Migrating VIP port for load balancer: %s', lb_id)
             lb2oct.migrate_vip_ports(n_session, CONF.migration.octavia_account_id, lb_id, n_lb)
@@ -237,6 +243,7 @@ def main():
             if (CONF.migration.delete_after_migration and not
                     CONF.migration.trial_run):
                 db_utils.cascade_delete_neutron_lb(n_session, lb_id)
+                bindings_to_delete.append(n_lb[0])
             
             # Rollback everything if we are in a trial run otherwise commit
             if CONF.migration.trial_run:
@@ -260,6 +267,23 @@ def main():
             db_utils.unlock_loadbalancer(n_session, lb_id)
             n_session.commit()
 
+    try:
+        # We can't be sure when no more loadbalancer with a given tenant exist
+        # in the DB. So we have to delete them here.
+        for tenant_binding in tenant_bindings_to_delete:
+            LOG.info('Deleting A10 tenant biding for tenant: %s', tenant_binding)
+            aten2oct.delete_binding_by_tenant(tenant_binding)
+
+        if CONF.migration.trial_run:
+            n_session.rollback()
+            LOG.info('Simulated deletion of A10 tenant bindings successful.')
+        else:
+            n_session.commit()
+            LOG.info('Deletion of A10 tenant bindings successful')
+    except Exception as e:
+        n_session.rollback()
+        LOG.exception("Skipping A10 tenant binding deletion due to: %s.", str(e))
+        failure_count += 1
 
     if failure_count:
         LOG.warning("%d failures were detected", failure_count)

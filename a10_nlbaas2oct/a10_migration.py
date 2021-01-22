@@ -14,6 +14,7 @@
 #    under the License.
 
 import datetime
+import functools
 
 import oslo_i18n as i18n
 from oslo_utils import uuidutils
@@ -33,11 +34,33 @@ class IncorrectPartitionTypeException(Exception):
         super(IncorrectPartitionTypeException, self).__init__(self.message)
 
 
+class UnsupportedAXAPIVersionException(Exception):
+
+    def __init__(self, axapi_version):
+        self.axapi_version = axapi_version
+        super(IncorrectPartitionTypeException, self).__init__(self.message)
+
+
 def get_device_name_by_tenant(a10_nlbaas_session, tenant_id):
-    device_name = a10_nlbaas_session.execute(
-        "SELECT device_name FROM neutron.a10_tenant_bindings WHERE "
-        "tenant_id = :tenant_id ;", {"tenant_id": tenant_id}).fetchone()
-    return device_name[0]
+
+    # The db session will change each time so we need this internal function instead
+    @functools.cache
+    def preform_db_select(db_tenant_id):
+        # To avoid side effects, pass the tenant_id to the internal function
+        # instead of using external definition
+        device_name = a10_nlbaas_session.execute(
+            "SELECT device_name FROM neutron.a10_tenant_bindings WHERE "
+            "tenant_id = :tenant_id ;", {"tenant_id": db_tenant_id}).fetchone()
+        return device_name[0]
+    
+    return preform_db_select(tenant_id)
+
+
+def delete_binding_by_tenant(a10_nlbaas_session, tenant_id):
+    # Delete the bindings
+    n_session.execute(
+        "DELETE FROM neutron.a10_tenant_bindings WHERE tenant_id = :tenant_id;",
+        {'tenant_id': tenant_id})
 
 
 def migrate_thunder(a10_oct_session, loadbalancer_id, tenant_id, device_info):
@@ -54,6 +77,10 @@ def migrate_thunder(a10_oct_session, loadbalancer_id, tenant_id, device_info):
     else:
         raise IncorrectPartitionTypeException(device_info['v_method'])
 
+    axapi_version = 30
+    if device_info['api_version'] not in ['3.0', 30]:
+        raise UnsupportedAXAPIVersionException(device_info['api_version'])
+
     result = a10_oct_session.execute(
         "INSERT INTO vthunders (vthunder_id, device_name, ip_address, username, "
         "password, axapi_version, undercloud, loadbalancer_id, project_id, "
@@ -68,7 +95,7 @@ def migrate_thunder(a10_oct_session, loadbalancer_id, tenant_id, device_info):
          'ip_address': device_info['host'],
          'username': device_info['username'],
          'password': device_info['password'],
-         'axapi_version': device_info['api_version'],
+         'axapi_version': axapi_version,
          'undercloud': 1,
          'loadbalancer_id': loadbalancer_id,
          'project_id': tenant_id,
