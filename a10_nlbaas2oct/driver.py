@@ -275,11 +275,9 @@ def main():
             aten2oct.delete_binding_by_tenant(tenant_binding)
 
         if CONF.migration.trial_run:
-            o_session.rollback()
             n_session.rollback()
             LOG.info('Simulated deletion of A10 tenant bindings successful.')
         else:
-            o_session.commit()
             n_session.commit()
             LOG.info('Deletion of A10 tenant bindings successful')
     except Exception as e:
