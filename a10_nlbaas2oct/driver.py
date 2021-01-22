@@ -148,7 +148,12 @@ def main():
             device_name = aten2oct.get_device_name_by_tenant(a10_nlbaas_session, n_lb[1])
             LOG.debug('Migrating Thunder device: %s', device_name)
             device_info = a10_config.get_device(device_name)
-            aten2oct.migrate_thunder(a10_oct_session, lb_id, n_lb[0], device_info)
+            try:
+                aten2oct.migrate_thunder(a10_oct_session, lb_id, n_lb[0], device_info)
+            except aten2oct.UnsupportedAXAPIVersionException as e:
+                LOG.warning('Skipping loadbalancer %s for device %s with AXAPI version %s. '
+                            'Only AXAPI version 3.0 is supported.',
+                            lb_id, device_name, e.axapi_version)
 
             LOG.info('Migrating VIP port for load balancer: %s', lb_id)
             lb2oct.migrate_vip_ports(n_session, CONF.migration.octavia_account_id, lb_id, n_lb)
