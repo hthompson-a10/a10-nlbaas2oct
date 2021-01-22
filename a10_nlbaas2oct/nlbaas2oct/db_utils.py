@@ -24,6 +24,13 @@ def lock_loadbalancer(n_session, lb_id):
         raise Exception(_('Load balancer is not provisioning_status '
                         'ACTIVE'))
 
+def unlock_loadbalancer(n_session, lb_id):
+    # Unlock the load balancer in neutron DB
+    result = n_session.execute(
+        "UPDATE lbaas_loadbalancers SET "
+        "provisioning_status = 'ACTIVE' WHERE id = :id AND "
+        "provisioning_status = 'PENDING_UPDATE';", {'id': lb_id})
+
 def get_loadbalancery_entry(n_session, lb_id):
     # Get the load balancer record from neutron
     n_lb = n_session.execute(

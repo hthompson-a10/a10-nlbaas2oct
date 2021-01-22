@@ -13,23 +13,14 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-import datetime
-import sys
 
-from oslo_config import cfg
-from oslo_db.sqlalchemy import enginefacade
 import oslo_i18n as i18n
-from oslo_log import log as logging
 from oslo_utils import uuidutils
-
-from a10_nlbaas2oct.a10_migration import a10_config as a10_cfg
 
 _translators = i18n.TranslatorFactory(domain='a10_migration')
 
 # The primary translation function using the well-known name "_"
 _ = _translators.primary
-
-CONF = cfg.CONF
 
 
 class IncorrectPartitionTypeException(Exception):
@@ -41,18 +32,15 @@ class IncorrectPartitionTypeException(Exception):
         super(IncorrectPartitionTypeException, self).__init__(self.message)
 
 
-def get_device_name_by_tenant(tenant_id):
-    return nlbaas_session.execute(
-            "SELECT device_name FROM neutron.a10_tenant_bindings WHERE "
-            "tenant_id = :tenant_id ;", {"tenant_id": tenant_id}).fetchone()
+def get_device_name_by_tenant(n_session, tenant_id):
+    device_name = n_session.execute(
+        "SELECT device_name FROM neutron.a10_tenant_bindings WHERE "
+        "tenant_id = :tenant_id ;", {"tenant_id": tenant_id}).fetchone()
+    return device_name
 
 
-def migrate_thunder(LOG, n_session_maker, o_session_maker, loadbalancer_id, tenant_id, device_info):
-
-    n_session = n_session_maker(autocommit=False)
-    o_session = o_session_maker(autocommit=False)
-
-    LOG.debug('Migrating Thunder device %s', device_info['name'])
+def migrate_thunder(o_session, loadbalancer_id, tenant_id, device_info):
+    # Create thunder entry
 
     vthunder_id = uuidutils.generate_uuid()
 
@@ -65,37 +53,33 @@ def migrate_thunder(LOG, n_session_maker, o_session_maker, loadbalancer_id, tena
     else:
         raise IncorrectPartitionTypeException(device_info['v_method'])
 
-    try:
-        result = oct_session.execute(
-            "INSERT INTO vthunders (vthunder_id, device_name, ip_address, username, "
-            "password, axapi_version, undercloud, loadbalancer_id, project_id, "
-            "topology, role, last_udp_update, status, created_at, updated_at, "
-            "partition_name, hierarchical_multitenancy) "
-            "VALUES (:vthunder_id, :device_name, :ip_address, :username, :password, "
-            ":axapi_version, :undercloud, :loadbalancer_id, :project_id, :topology, "
-            ":role, :last_udp_update, :status, :created_at, :updated_at, :partition_name, "
-            ":hierarchical_multitenancy);",
-            {'vthunder_id': vthunder_id,
-             'device_name': device_info['name'],
-             'ip_address': device_info['host'],
-             'username': device_info['username'],
-             'password': device_info['password'],
-             'axapi_version': device_info['api_version'],
-             'undercloud': 1,
-             'loadbalancer_id': loadbalancer_id,
-             'project_id': tenant_id,
-             'topology': "STANDALONE",
-             'role': "MASTER",
-             'status': "ACTIVE",
-             'last_udp_update': datetime.datetime.utcnow(),
-             'created_at': datetime.datetime.utcnow(),
-             'updated_at': datetime.datetime.utcnow(),
-             'partition_name': partition_name,
-             'hierarchical_multitenancy': hierarchical_multitenancy}
+    result = o_session.execute(
+        "INSERT INTO vthunders (vthunder_id, device_name, ip_address, username, "
+        "password, axapi_version, undercloud, loadbalancer_id, project_id, "
+        "topology, role, last_udp_update, status, created_at, updated_at, "
+        "partition_name, hierarchical_multitenancy) "
+        "VALUES (:vthunder_id, :device_name, :ip_address, :username, :password, "
+        ":axapi_version, :undercloud, :loadbalancer_id, :project_id, :topology, "
+        ":role, :last_udp_update, :status, :created_at, :updated_at, :partition_name, "
+        ":hierarchical_multitenancy);",
+        {'vthunder_id': vthunder_id,
+         'device_name': device_info['name'],
+         'ip_address': device_info['host'],
+         'username': device_info['username'],
+         'password': device_info['password'],
+         'axapi_version': device_info['api_version'],
+         'undercloud': 1,
+         'loadbalancer_id': loadbalancer_id,
+         'project_id': tenant_id,
+         'topology': "STANDALONE",
+         'role': "MASTER",
+         'status': "ACTIVE",
+         'last_udp_update': datetime.datetime.utcnow(),
+         'created_at': datetime.datetime.utcnow(),
+         'updated_at': datetime.datetime.utcnow(),
+         'partition_name': partition_name,
+         'hierarchical_multitenancy': hierarchical_multitenancy}
         )
-        return 0
-    except Exception as e:
-        n_session.rollback()
-        o_session.rollback()
-        LOG.exception("Skipping Thunder %s due to: %s.", lb_id, str(e))
-        return 1
+        if result.rowcount != 1:
+          raise Exception(_('Unable to create Thunder in the A10 Octavia database.'))
+

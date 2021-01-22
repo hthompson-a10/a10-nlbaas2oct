@@ -18,9 +18,10 @@ import oslo_i18n as i18n
 from oslo_log import log as logging
 from oslo_utils import uuidutils
 
+from a10_nlbaas2oct import a10_config as a10_cfg
+from a10_nlbaas2oct import a10_migration as aten2oct
 from a10_nlbaas2oct import db_utils
 from a10_nlbaas2oct import lbaas_migration as lb2oct
-from a10_nlbaas2oct import a10_migration as a102oct
 
 _translators = i18n.TranslatorFactory(domain='a10_migration')
 
@@ -137,14 +138,16 @@ def main():
             # and associated tenant_id
             LOG.info('Locking load balancer: %s', lb_id)
             db_utils.lock_loadbalancer(lb_id)
-            #device_info = a10_config.get_device(device_name)
-            #migrate_thunder(LOG, n_session_maker, o_session_maker, lb_id[0],
-                            #tenant_id, device_info)
 
             n_lb = db_utils.get_loadbalancery_entry(n_session, lb_id)
             if n_lb[0] != 'a10networks':
                 LOG.info('Skipping loadbalancer with provider %s. Not an A10 Networks LB', n_lb[0])
                 continue
+
+            device_name = aten2oct.get_device_name_by_tenant(n_lb[1])
+            LOG.debug('Migrating Thunder device %s', device_info['name'])
+            device_info = a10_config.get_device(device_name)
+            aten2oct.migrate_thunder(o_session, lb_id[0], tenant_id, device_info)
 
             LOG.info('Migrating VIP port for load balancer: %s', lb_id)
             lb2oct.migrate_vip_ports(n_session, o_session, CONF.migration.octavia_account_id, lb_id, n_lb)
@@ -249,6 +252,12 @@ def main():
             o_session.rollback()
             LOG.exception("Skipping load balancer %s due to: %s.", lb_id, str(e))
             failure_count += 1
+        finally:
+            # Attempt to unlock the loadbalancer even if an error occured or it was deleted.
+            # This ensures we don't get stuck in pending states
+            LOG.info('Unlocking load balancer: %s', lb_id)
+            db_utils.unlock_loadbalancer(n_session, lb_id)
+            n_session.commit()
 
 
     if failure_count:
