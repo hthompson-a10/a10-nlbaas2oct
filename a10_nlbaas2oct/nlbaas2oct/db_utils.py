@@ -31,7 +31,22 @@ def unlock_loadbalancer(n_session, lb_id):
         "provisioning_status = 'ACTIVE' WHERE id = :id AND "
         "provisioning_status = 'PENDING_UPDATE';", {'id': lb_id})
 
-def get_loadbalancery_entry(n_session, lb_id):
+def get_loadbalancer_ids(n_session, conf_lb_id=None, conf_project_id=None):
+    lb_id_list = []
+    if conf_lb_id:
+        lb_id_list = [[conf_lb_id]]
+    elif conf_project_id:
+        lb_id_list = nlbaas_session.execute(
+            "SELECT id FROM neutron.lbaas_loadbalancers WHERE "
+            "project_id = :id AND provisioning_status = 'ACTIVE';",
+            {'id': conf_project_id}).fetchall()
+    else:  # CONF.ALL
+        lb_id_list = nlbaas_session.execute(
+            "SELECT id FROM neutron.lbaas_loadbalancers WHERE "
+            "provisioning_status = 'ACTIVE';").fetchall()
+    return lb_id_list
+
+def get_loadbalancer_entry(n_session, lb_id):
     # Get the load balancer record from neutron
     n_lb = n_session.execute(
         "SELECT b.provider_name, a.project_id, a.name, a.description, "

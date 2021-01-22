@@ -32,14 +32,14 @@ class IncorrectPartitionTypeException(Exception):
         super(IncorrectPartitionTypeException, self).__init__(self.message)
 
 
-def get_device_name_by_tenant(n_session, tenant_id):
+def get_device_name_by_tenant(a10_nlbaas_session, tenant_id):
     device_name = n_session.execute(
         "SELECT device_name FROM neutron.a10_tenant_bindings WHERE "
         "tenant_id = :tenant_id ;", {"tenant_id": tenant_id}).fetchone()
     return device_name
 
 
-def migrate_thunder(o_session, loadbalancer_id, tenant_id, device_info):
+def migrate_thunder(a10_oct_session, loadbalancer_id, tenant_id, device_info):
     # Create thunder entry
 
     vthunder_id = uuidutils.generate_uuid()

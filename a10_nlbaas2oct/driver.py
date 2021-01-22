@@ -56,7 +56,7 @@ migration_opts = [
     cfg.StrOpt('a10_nlbaas_db_connection',
                required=False,
                help='The a10 nlbaas database connection string'),
-    cfg.StrOpt('a10_oct_connection',
+    cfg.StrOpt('a10_oct_db_connection',
                required=False,
                help='The a10 octavia database connection string'),
     cfg.StrOpt('a10_config_path',
@@ -91,46 +91,45 @@ def main():
         print('Error: Only one of --all, --lb_id, --project_id allowed.')
         return 1
 
-    # TODO: IF a10 dbs not specified then default to lbaas dbs
-
     neutron_context_manager = enginefacade.transaction_context()
     neutron_context_manager.configure(
         connection=CONF.migration.neutron_db_connection)
     n_session_maker = neutron_context_manager.writer.get_sessionmaker()
+    n_session = n_session_maker(autocommit=False)
 
     octavia_context_manager = enginefacade.transaction_context()
     octavia_context_manager.configure(
         connection=CONF.migration.octavia_db_connection)
     o_session_maker = octavia_context_manager.writer.get_sessionmaker()
+    o_session = o_session_maker(autocommit=False)
+
+    if CONF.migration.a10_nlbaas_db_connection:
+        a10_nlbaas_context_manager = enginefacade.transaction_context()
+        a10_nlbaas_context_manager.configure(
+            connection=CONF.migration.a10_nlbaas_db_connection)
+        a10_nlbaas_session_maker = a10_nlbaas_context_manager.writer.get_sessionmaker()
+        a10_nlbaas_session = a10_nlbaas_session_maker(autocommit=False)
+    else:
+        a10_nlbaas_session = n_session
+
+    if CONF.migration.a10_oct_db_connection:
+        a10_oct_context_manager = enginefacade.transaction_context()
+        a10_oct_context_manager.configure(
+            connection=CONF.migration.a10_oct_db_connection)
+        a10_oct_session_maker = a10_oct_context_manager.writer.get_sessionmaker()
+        a10_oct_session = a10_oct_session_maker(autocommit=False)
+    else:
+        a10_oct_session = o_session
 
     LOG.info('Starting migration.')
-
-    nlbaas_session = n_session_maker(autocommit=False)
-
-    lb_id_list = []
-    if CONF.lb_id:
-        lb_id_list = [[CONF.lb_id]]
-    elif CONF.project_id:
-        lb_id_list = nlbaas_session.execute(
-            "SELECT id FROM neutron.lbaas_loadbalancers WHERE "
-            "project_id = :id AND provisioning_status = 'ACTIVE';",
-            {'id': CONF.project_id}).fetchall()
-    else:  # CONF.ALL
-        lb_id_list = nlbaas_session.execute(
-            "SELECT id FROM neutron.lbaas_loadbalancers WHERE "
-            "provisioning_status = 'ACTIVE';").fetchall()
-    
-    # TODO: Get tenant_id from the loadbalancer as well
-    # Tenant_id is consumed by the thunder migration
 
     a10_config = a10_cfg.A10Config(config_dir=CONF.migration.a10_config_path,
                                    provider="a10networks")
 
-    n_session = n_session_maker(autocommit=False)
-    o_session = o_session_maker(autocommit=False)
-
     # Migrate the loadbalancers and their child objects
     failure_count = 0
+    lb_id_list = db_utils.get_loadbalancer_ids(n_session, conf_lb_id=CONF.lb_id,
+                                               conf_project_id=CONF.project_id)
     for lb_id in lb_id_list:
         try:
             lb_id = lb_id[0]
@@ -139,15 +138,15 @@ def main():
             LOG.info('Locking load balancer: %s', lb_id)
             db_utils.lock_loadbalancer(lb_id)
 
-            n_lb = db_utils.get_loadbalancery_entry(n_session, lb_id)
+            n_lb = db_utils.get_loadbalancer_entry(n_session, lb_id)
             if n_lb[0] != 'a10networks':
                 LOG.info('Skipping loadbalancer with provider %s. Not an A10 Networks LB', n_lb[0])
                 continue
 
-            device_name = aten2oct.get_device_name_by_tenant(n_lb[1])
-            LOG.debug('Migrating Thunder device %s', device_info['name'])
+            device_name = aten2oct.get_device_name_by_tenant(a10_nlbaas_session, n_lb[1])
+            LOG.debug('Migrating Thunder device: %s', device_info['name'])
             device_info = a10_config.get_device(device_name)
-            aten2oct.migrate_thunder(o_session, lb_id[0], tenant_id, device_info)
+            aten2oct.migrate_thunder(a10_oct_session, lb_id[0], tenant_id, device_info)
 
             LOG.info('Migrating VIP port for load balancer: %s', lb_id)
             lb2oct.migrate_vip_ports(n_session, o_session, CONF.migration.octavia_account_id, lb_id, n_lb)
