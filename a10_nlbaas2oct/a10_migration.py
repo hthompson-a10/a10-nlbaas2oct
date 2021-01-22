@@ -56,6 +56,13 @@ def get_device_name_by_tenant(a10_nlbaas_session, tenant_id):
     return preform_db_select(tenant_id)
 
 
+def delete_binding_by_tenant(a10_nlbaas_session, tenant_id):
+    # Delete the bindings
+    n_session.execute(
+        "DELETE FROM neutron.a10_tenant_bindings WHERE tenant_id = :tenant_id;",
+        {'tenant_id': tenant_id})
+
+
 def migrate_thunder(a10_oct_session, loadbalancer_id, tenant_id, device_info):
     # Create thunder entry
 
