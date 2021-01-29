@@ -85,7 +85,7 @@ def get_l7policies_by_listener(n_session, listener_id):
         "lbaas_l7policies WHERE listener_id = :listener_id AND "
         "provisioning_status = 'ACTIVE';",
         {'listener_id': listener_id}).fetchall()
-    return l7polcies
+    return l7policies
 
 def get_l7rules_by_l7policy(n_session, l7policy_id):
     l7rules = n_session.execute(

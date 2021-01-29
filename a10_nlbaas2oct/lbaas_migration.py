@@ -19,6 +19,8 @@ from oslo_db.sqlalchemy import enginefacade
 import oslo_i18n as i18n
 from oslo_log import log as logging
 
+from a10_nlbaas2oct import db_utils
+
 
 def migrate_vip_ports(n_session, oct_accnt_id, lb_id, n_lb):
 
@@ -96,7 +98,7 @@ def migrate_vip(n_session, o_session, lb_id, n_lb):
                         'database.'))
 
 
-def migrate_listener(o_session, lb_id, n_lb, listener, lb_stats):
+def migrate_listener(n_session, o_session, lb_id, n_lb, listener, lb_stats):
     # Create listener
     result = o_session.execute(
         "INSERT INTO listener (id, project_id, name, description, "
@@ -126,6 +128,7 @@ def migrate_listener(o_session, lb_id, n_lb, listener, lb_stats):
     # Convert load balancer stats to listener stats
     # This conversion may error on the low side due to
     # the division
+    listeners, lb_stats = db_utils.get_listeners_and_stats_by_lb(n_session, lb_id)
     result = o_session.execute(
         "INSERT INTO listener_statistics (listener_id, bytes_in, "
         "bytes_out, active_connections, total_connections, "

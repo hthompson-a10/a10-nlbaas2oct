@@ -174,10 +174,10 @@ def main():
                 elif listener[8] != 'ACTIVE':
                     raise Exception(_('Listener is invalid state of %s.'),
                                      listener[8])
-                lb2oct.migrate_listener(o_session, lb_id, n_lb, listener, lb_stats)
+                lb2oct.migrate_listener(n_session, o_session, lb_id, n_lb, listener, lb_stats)
 
                 # Handle SNI certs
-                SNIs = db_utils.get_SNIs_by_listener(n_session, listener_id)
+                SNIs = db_utils.get_SNIs_by_listener(n_session, listener[0])
                 for SNI in SNIs:
                     LOG.debug('Migrating SNI: %s', SNI[0])
                     lb2oct.migrate_SNI(o_session, listener[0], SNI)
@@ -212,7 +212,7 @@ def main():
                     continue
                 elif pool[7] != 'ACTIVE':
                     raise Exception(_('Pool is invalid state of %s.'), pool[7])
-                lb2oct.migrate_pool(o_session, lb_id, n_lb, pool)
+                lb2oct.migrate_pools(o_session, lb_id, n_lb, pool)
 
                 hm_id = pool[5]
                 if hm_id is not None:
@@ -243,7 +243,7 @@ def main():
             if (CONF.migration.delete_after_migration and not
                     CONF.migration.trial_run):
                 db_utils.cascade_delete_neutron_lb(n_session, lb_id)
-                bindings_to_delete.append(n_lb[0])
+                tenant_bindings_to_delete.append(n_lb[0])
             
             # Rollback everything if we are in a trial run otherwise commit
             if CONF.migration.trial_run:
@@ -272,7 +272,7 @@ def main():
         # in the DB. So we have to delete them here.
         for tenant_binding in tenant_bindings_to_delete:
             LOG.info('Deleting A10 tenant biding for tenant: %s', tenant_binding)
-            aten2oct.delete_binding_by_tenant(tenant_binding)
+            aten2oct.delete_binding_by_tenant(n_session, tenant_binding)
 
         if CONF.migration.trial_run:
             n_session.rollback()
