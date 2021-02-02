@@ -191,7 +191,7 @@ def main():
                     elif l7policy[8] != 'ACTIVE':
                         raise Exception(_('L7 policy is invalid state of %s.'),
                                         l7policy[8])                    
-                    lb2oct.migrate_l7policy(o_session, n_lb[1], listener[0], l7_policy)
+                    lb2oct.migrate_l7policy(o_session, n_lb[1], listener[0], l7policy)
                     
                      # Handle L7 rule records
                     l7rules = db_utils.get_l7rules_by_l7policy(n_session, l7policy[0])
@@ -202,7 +202,7 @@ def main():
                         elif l7rule[6] != 'ACTIVE':
                             raise Exception(_('L7 rule is invalid state of %s.'),
                                             l7rule[6])
-                        lb2oct.migrate_l7rule(o_session, n_lb[1], l7_policy, l7rule)              
+                        lb2oct.migrate_l7rule(o_session, n_lb[1], l7policy, l7rule)
 
             # Start pool migration
             pools = db_utils.get_pool_entries_by_lb(n_session, lb_id)
@@ -227,7 +227,7 @@ def main():
                     lb2oct.migrate_session_persistence(o_session, pool[0], sp)
 
                 # Handle the pool members
-                members = db_utils.get_members_by_pool(n_session, pool_id)
+                members = db_utils.get_members_by_pool(n_session, pool[0])
                 for member in members:
                     LOG.debug('Migrating member: %s', member[0])
                     if member[6] == 'DELETED':
