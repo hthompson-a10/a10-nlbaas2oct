@@ -12,15 +12,31 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
+from neutron_lbaas.db.loadbalancer import loadbalancer_dbv2 as lb_v2
+from neutron_lbaas.services.loadbalancer import data_models
 
-def create_lb():
-    pass
 
-def create_listener():
-    pass
+LOADBALANCER = {
+    'id': 1,
+    'tenant_id': 'tenant_1',
+    'name': 'lb_1',
+    'operating_status': 'ACTIVE',
+    'admin_state_up': True,
+    'provider': 'a10networks'
+}
 
-def create_pool():
-    pass
+LISTENER = {}
 
-def create_member():
-    pass
+SNI = {}
+
+L7POLICY = {}
+
+L7RULE = {}
+
+POOL = {}
+
+HM = {}
+
+SP = {}
+
+MEMBER = {}
