@@ -70,19 +70,26 @@ cfg.CONF.register_cli_opts(cli_opts)
 cfg.CONF.register_opts(migration_opts, group='migration')
 
 
-def main():
-    if len(sys.argv) == 1:
-        print('Error: Config file must be specified.')
-        print('a10_nlbaas2oct --config-file <filename>')
+def load_config(cli_args):
+    # Having this func outside of main makes testing possible
+
+    if len(cli_args) == 1:
         return 1
+
     logging.register_options(cfg.CONF)
-    cfg.CONF(args=sys.argv[1:],
+    cfg.CONF(args=cli_args[1:],
              project='a10_nlbaas2oct',
              version='a10_nlbaas2oct 1.0')
     logging.set_defaults()
     logging.setup(cfg.CONF, 'a10_nlbaas2oct')
     LOG = logging.getLogger('a10_nlbaas2oct')
     CONF.log_opt_values(LOG, logging.DEBUG)
+
+def main():
+    if load_config(cli_args):
+        print('Error: Config file must be specified.')
+        print('a10_nlbaas2oct --config-file <filename>')
+        return 1
 
     if not CONF.all and not CONF.lb_id and not CONF.project_id:
         print('Error: One of --all, --lb_id, --project_id must be specified.')

@@ -12,71 +12,71 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-import abc
-import mysql.connector
-from mysql.connector import errorcode
-from mock import patch
-import unittest
-import utils
+# import abc
+# import mysql.connector
+# from mysql.connector import errorcode
+# from mock import patch
+# import unittest
+# import utils
 
 
-class MockDBBase(abc.ABCMeta):
+# class MockDBBase(abc.ABCMeta):
 
-    # @abc.abstractmethod
-    # def _build_tables(self):
-    #     pass
+#     # @abc.abstractmethod
+#     # def _build_tables(self):
+#     #     pass
 
-    def __init__(self, db, host, user, passwd, port):
-        self.db = db
-        self.host = host
-        self.user = user
-        self.passwd = passwd
-        self.port = port
+#     def __init__(self, db, host, user, passwd, port):
+#         self.db = db
+#         self.host = host
+#         self.user = user
+#         self.passwd = passwd
+#         self.port = port
 
-    def setUp(self):
+#     def setUp(self):
 
-        cnx = mysql.connector.connect(
-            host=self.host,
-            user=self.user,
-            password=self.passwd,
-            port=self.port
-        )
-        cursor = cnx.cursor(dictionary=True)
+#         cnx = mysql.connector.connect(
+#             host=self.host,
+#             user=self.user,
+#             password=self.passwd,
+#             port=self.port
+#         )
+#         cursor = cnx.cursor(dictionary=True)
 
-        try:
-            cursor.execute("DROP DATABASE {}".format(db))
-            cursor.close()
-            print("DB dropped")
-        except mysql.connector.Error as err:
-            print("{}{}".format(db, err))
+#         try:
+#             cursor.execute("DROP DATABASE {}".format(db))
+#             cursor.close()
+#             print("DB dropped")
+#         except mysql.connector.Error as err:
+#             print("{}{}".format(db, err))
 
-        cursor = cnx.cursor(dictionary=True)
-        try:
-            cursor.execute(
-                "CREATE DATABASE {} DEFAULT CHARACTER SET 'utf8'".format(db))
-        except mysql.connector.Error as err:
-            print("Failed creating database: {}".format(err))
-            exit(1)
+#         cursor = cnx.cursor(dictionary=True)
+#         try:
+#             cursor.execute(
+#                 "CREATE DATABASE {} DEFAULT CHARACTER SET 'utf8'".format(db))
+#         except mysql.connector.Error as err:
+#             print("Failed creating database: {}".format(err))
+#             exit(1)
 
-        cursor.close()
-        cnx.close()
+#         cursor.close()
+#         cnx.close()
 
-    def tearDown(self):
-        cnx = mysql.connector.connect(
-            host=self.host,
-            user=self.user,
-            password=self.passwd,
-            port=self.port
-        )
-        cursor = cnx.cursor(dictionary=True)
+#     def tearDown(self):
+#         cnx = mysql.connector.connect(
+#             host=self.host,
+#             user=self.user,
+#             password=self.passwd,
+#             port=self.port
+#         )
+#         cursor = cnx.cursor(dictionary=True)
 
-        try:
-            cursor.execute("DROP DATABASE {}".format(self.db))
-            cnx.commit()
-            cursor.close()
-        except mysql.connector.Error as err:
-            print("Database {} does not exists. Dropping db failed".format(self.db))
-        cnx.close()
+#         try:
+#             cursor.execute("DROP DATABASE {}".format(self.db))
+#             cnx.commit()
+#             cursor.close()
+#         except mysql.connector.Error as err:
+#             print("Database {} does not exists. Dropping db failed".format(self.db))
+#         cnx.close()
 
 
 # class MockNeutronDB(MockDBBase):
