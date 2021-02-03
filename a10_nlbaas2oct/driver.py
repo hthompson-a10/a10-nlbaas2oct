@@ -174,10 +174,10 @@ def main():
                 elif listener[8] != 'ACTIVE':
                     raise Exception(_('Listener is invalid state of %s.'),
                                      listener[8])
-                lb2oct.migrate_listener(o_session, lb_id, n_lb, listener, lb_stats)
+                lb2oct.migrate_listener(n_session, o_session, lb_id, n_lb, listener, lb_stats)
 
                 # Handle SNI certs
-                SNIs = db_utils.get_SNIs_by_listener(n_session, listener_id)
+                SNIs = db_utils.get_SNIs_by_listener(n_session, listener[0])
                 for SNI in SNIs:
                     LOG.debug('Migrating SNI: %s', SNI[0])
                     lb2oct.migrate_SNI(o_session, listener[0], SNI)
@@ -191,7 +191,7 @@ def main():
                     elif l7policy[8] != 'ACTIVE':
                         raise Exception(_('L7 policy is invalid state of %s.'),
                                         l7policy[8])                    
-                    lb2oct.migrate_l7policy(o_session, n_lb[1], listener[0], l7_policy)
+                    lb2oct.migrate_l7policy(o_session, n_lb[1], listener[0], l7policy)
                     
                      # Handle L7 rule records
                     l7rules = db_utils.get_l7rules_by_l7policy(n_session, l7policy[0])
@@ -202,7 +202,7 @@ def main():
                         elif l7rule[6] != 'ACTIVE':
                             raise Exception(_('L7 rule is invalid state of %s.'),
                                             l7rule[6])
-                        lb2oct.migrate_l7rule(o_session, n_lb[1], l7_policy, l7rule)              
+                        lb2oct.migrate_l7rule(o_session, n_lb[1], l7policy, l7rule)
 
             # Start pool migration
             pools = db_utils.get_pool_entries_by_lb(n_session, lb_id)
@@ -212,7 +212,7 @@ def main():
                     continue
                 elif pool[7] != 'ACTIVE':
                     raise Exception(_('Pool is invalid state of %s.'), pool[7])
-                lb2oct.migrate_pool(o_session, lb_id, n_lb, pool)
+                lb2oct.migrate_pools(o_session, lb_id, n_lb, pool)
 
                 hm_id = pool[5]
                 if hm_id is not None:
@@ -227,7 +227,7 @@ def main():
                     lb2oct.migrate_session_persistence(o_session, pool[0], sp)
 
                 # Handle the pool members
-                members = db_utils.get_members_by_pool(n_session, pool_id)
+                members = db_utils.get_members_by_pool(n_session, pool[0])
                 for member in members:
                     LOG.debug('Migrating member: %s', member[0])
                     if member[6] == 'DELETED':
@@ -243,7 +243,7 @@ def main():
             if (CONF.migration.delete_after_migration and not
                     CONF.migration.trial_run):
                 db_utils.cascade_delete_neutron_lb(n_session, lb_id)
-                bindings_to_delete.append(n_lb[0])
+                tenant_bindings_to_delete.append(n_lb[0])
             
             # Rollback everything if we are in a trial run otherwise commit
             if CONF.migration.trial_run:
@@ -272,7 +272,7 @@ def main():
         # in the DB. So we have to delete them here.
         for tenant_binding in tenant_bindings_to_delete:
             LOG.info('Deleting A10 tenant biding for tenant: %s', tenant_binding)
-            aten2oct.delete_binding_by_tenant(tenant_binding)
+            aten2oct.delete_binding_by_tenant(n_session, tenant_binding)
 
         if CONF.migration.trial_run:
             n_session.rollback()

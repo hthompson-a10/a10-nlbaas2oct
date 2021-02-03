@@ -44,7 +44,7 @@ class UnsupportedAXAPIVersionException(Exception):
 def get_device_name_by_tenant(a10_nlbaas_session, tenant_id):
 
     # The db session will change each time so we need this internal function instead
-    @functools.cache
+    @functools.lru_cache(maxsize=None)
     def preform_db_select(db_tenant_id):
         # To avoid side effects, pass the tenant_id to the internal function
         # instead of using external definition
@@ -58,7 +58,7 @@ def get_device_name_by_tenant(a10_nlbaas_session, tenant_id):
 
 def delete_binding_by_tenant(a10_nlbaas_session, tenant_id):
     # Delete the bindings
-    n_session.execute(
+    a10_nlbaas_session.execute(
         "DELETE FROM neutron.a10_tenant_bindings WHERE tenant_id = :tenant_id;",
         {'tenant_id': tenant_id})
 
