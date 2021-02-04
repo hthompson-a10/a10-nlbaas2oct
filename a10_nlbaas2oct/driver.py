@@ -71,11 +71,8 @@ cfg.CONF.register_opts(migration_opts, group='migration')
 
 
 def load_config(cli_args):
-    # Having this func outside of main makes testing possible
-
     if len(cli_args) == 1:
         return 1
-
     logging.register_options(cfg.CONF)
     cfg.CONF(args=cli_args[1:],
              project='a10_nlbaas2oct',
@@ -84,6 +81,7 @@ def load_config(cli_args):
     logging.setup(cfg.CONF, 'a10_nlbaas2oct')
     LOG = logging.getLogger('a10_nlbaas2oct')
     CONF.log_opt_values(LOG, logging.DEBUG)
+
 
 def main():
     if load_config(cli_args):
