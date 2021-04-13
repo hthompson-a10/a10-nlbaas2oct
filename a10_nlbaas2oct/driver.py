@@ -42,7 +42,7 @@ cli_opts = [
 ]
 
 migration_opts = [
-    cfg.BoolOpt('delete_after_migration', default=True,
+    cfg.BoolOpt('delete_after_migration', default=False,
                 help='Delete the load balancer records from neutron-lbaas'
                      ' after migration'),
     cfg.BoolOpt('trial_run', default=False,
@@ -268,7 +268,7 @@ def main():
             n_session.commit()
 
     try:
-        # We can't be sure when no more loadbalancer with a given tenant exist
+        # We can't be sure when no more loadbalancers with a given tenant exist
         # in the DB. So we have to delete them here.
         for tenant_binding in tenant_bindings_to_delete:
             LOG.info('Deleting A10 tenant biding for tenant: %s', tenant_binding)
@@ -277,7 +277,7 @@ def main():
         if CONF.migration.trial_run:
             n_session.rollback()
             LOG.info('Simulated deletion of A10 tenant bindings successful.')
-        else:
+        elif len(tenant_bindings_to_delete) > 0:
             n_session.commit()
             LOG.info('Deletion of A10 tenant bindings successful')
     except Exception as e:
