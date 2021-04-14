@@ -19,7 +19,7 @@ pip install -e .
 
 ## Usage
 
-## Step 1: Copy the config file from the project to another directory
+## Step 1: Copy the sample config file from the project to another directory
 
 ### Installed from PyPi
 ```
@@ -29,6 +29,44 @@ pip show a10-nlbaas2oct | grep "Location" | cp $(awk '{print $2}')/a10_nlbaas2oc
 ### Installed from source
 ```
 cp /path/to/a10-nlbaas2oct/a10_nlbaas2oct/a10_nlbaas2oct.conf /path/to/another/directory
+```
+
+### Sample Config File Contents
+```
+[DEFAULT]
+
+debug = True
+
+[migration]
+
+# Run without making changes
+# trial_run = False
+
+# Delete the load balancer records from neutron-lbaas after migration
+# delete_after_migration = False
+
+# Octavia service account ID or username (ex: admin)
+octavia_account_id =
+
+# Example db connection string:
+# connection = mysql+pymysql://root:password@127.0.0.1:3306/octavia
+# Replace 127.0.0.1 above with the IP address of the database used by the
+# main octavia server. (Leave it as is if the database runs on this host.)
+
+# Connection string for the neutron database
+neutron_db_connection =
+
+# Connection string for the octavia database
+octavia_db_connection =
+
+# Connection string for the A10 database used in neutron lbaas env
+# a10_nlbaas_db_connection =
+
+# Connection string for the A10 database used in the octavia env
+# a10_oct_connection =
+
+# Path to config file. Default is /etc/a10
+a10_config_path = /etc/a10
 ```
 
 ## Step 2: Modify the config file
