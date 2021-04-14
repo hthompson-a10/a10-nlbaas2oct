@@ -14,7 +14,7 @@
 #    under the License.
 
 import datetime
-import functools
+import functools32
 
 import oslo_i18n as i18n
 from oslo_utils import uuidutils
@@ -44,7 +44,7 @@ class UnsupportedAXAPIVersionException(Exception):
 def get_device_name_by_tenant(a10_nlbaas_session, tenant_id):
 
     # The db session will change each time so we need this internal function instead
-    @functools.lru_cache(maxsize=None)
+    @functools32.lru_cache(maxsize=None)
     def preform_db_select(db_tenant_id):
         # To avoid side effects, pass the tenant_id to the internal function
         # instead of using external definition

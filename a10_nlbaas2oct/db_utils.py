@@ -13,7 +13,6 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-
 def lock_loadbalancer(n_session, lb_id):
     # Lock the load balancer in neutron DB
     result = n_session.execute(
@@ -34,7 +33,16 @@ def unlock_loadbalancer(n_session, lb_id):
 def get_loadbalancer_ids(n_session, conf_lb_id=None, conf_project_id=None):
     lb_id_list = []
     if conf_lb_id:
-        lb_id_list = [[conf_lb_id]]
+        lb_id = n_session.execute(
+            "SELECT id FROM neutron.lbaas_loadbalancers WHERE "
+            "id = :id AND provisioning_status = 'ACTIVE';",
+            {'id': conf_lb_id}).fetchall()
+        if not lb_id:
+            error_msg = ('Loadbalancer with ID {} could not be found. '
+                         'Please ensure you are using the UUID '
+                         'instead of the name.').format(conf_lb_id)
+            raise Exception(_(error_msg))
+        lb_id_list = lb_id
     elif conf_project_id:
         lb_id_list = n_session.execute(
             "SELECT id FROM neutron.lbaas_loadbalancers WHERE "
