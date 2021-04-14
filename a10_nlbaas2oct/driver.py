@@ -35,9 +35,9 @@ CONF = cfg.CONF
 cli_opts = [
     cfg.BoolOpt('all', default=False,
                 help='Migrate all load balancers'),
-    cfg.StrOpt('lb_id',
+    cfg.StrOpt('lb-id',
                help='Load balancer ID to migrate'),
-    cfg.StrOpt('project_id',
+    cfg.StrOpt('project-id',
                help='Migrate all load balancers owned by this project'),
 ]
 
@@ -165,7 +165,43 @@ def main():
             LOG.info('Migrating VIP for load balancer: %s', lb_id)
             lb2oct.migrate_vip(n_session, o_session, lb_id, n_lb)
 
-            # Start listener migration
+
+            # Start pool migration
+            pools = db_utils.get_pool_entries_by_lb(n_session, lb_id)
+            for pool in pools:
+                LOG.debug('Migrating pool: %s', pool[0])
+                if pool[7] == 'DELETED':
+                    continue
+                elif pool[7] != 'ACTIVE':
+                    raise Exception(_('Pool is invalid state of %s.'), pool[7])
+                lb2oct.migrate_pools(o_session, lb_id, n_lb, pool)
+
+                hm_id = pool[5]
+                if hm_id is not None:
+                    LOG.debug('Migrating health manager: %s', hm_id)
+                    hm = db_utils.get_healthmonitor(n_session, hm_id)
+                    lb2oct.migrate_health_monitor(o_session, n_lb[1], pool[0], hm_id, hm)
+
+                # Handle the session persistence records
+                sp = db_utils.get_sess_pers_by_pool(n_session, pool[0])
+                if sp:
+                    LOG.debug('Migrating session persistence for pool: %s', pool[0])
+                    lb2oct.migrate_session_persistence(o_session, pool[0], sp)
+
+                # Handle the pool members
+                members = db_utils.get_members_by_pool(n_session, pool[0])
+                for member in members:
+                    LOG.debug('Migrating member: %s', member[0])
+                    if member[6] == 'DELETED':
+                        continue
+                    elif member[6] != 'ACTIVE':
+                        raise Exception(_('Member %s for pool %s is invalid state of %s.'),
+                                        member[0],
+                                        pool_id,
+                                        member[6])
+                    lb2oct.migrate_member(o_session, n_lb[1], pool[0], member)
+
+            # Start listener migration. Must come after pool due to l7policy fk
             listeners, lb_stats = db_utils.get_listeners_and_stats_by_lb(n_session, lb_id)
             for listener in listeners:
                 LOG.debug('Migrating listener: %s', listener[0])
@@ -203,41 +239,6 @@ def main():
                             raise Exception(_('L7 rule is invalid state of %s.'),
                                             l7rule[6])
                         lb2oct.migrate_l7rule(o_session, n_lb[1], l7policy, l7rule)
-
-            # Start pool migration
-            pools = db_utils.get_pool_entries_by_lb(n_session, lb_id)
-            for pool in pools:
-                LOG.debug('Migrating pool: %s', pool[0])
-                if pool[7] == 'DELETED':
-                    continue
-                elif pool[7] != 'ACTIVE':
-                    raise Exception(_('Pool is invalid state of %s.'), pool[7])
-                lb2oct.migrate_pools(o_session, lb_id, n_lb, pool)
-
-                hm_id = pool[5]
-                if hm_id is not None:
-                    LOG.debug('Migrating health manager: %s', hm_id)
-                    hm = db_utils.get_healthmonitor(n_session, hm_id)
-                    lb2oct.migrate_health_monitor(o_session, n_lb[1], pool[0], hm_id, hm)
-
-                # Handle the session persistence records
-                sp = db_utils.get_sess_pers_by_pool(n_session, pool[0])
-                if sp:
-                    LOG.debug('Migrating session persistence for pool: %s', pool[0])
-                    lb2oct.migrate_session_persistence(o_session, pool[0], sp)
-
-                # Handle the pool members
-                members = db_utils.get_members_by_pool(n_session, pool[0])
-                for member in members:
-                    LOG.debug('Migrating member: %s', member[0])
-                    if member[6] == 'DELETED':
-                        continue
-                    elif member[6] != 'ACTIVE':
-                        raise Exception(_('Member %s for pool %s is invalid state of %s.'),
-                                        member[0],
-                                        pool_id,
-                                        member[6])
-                    lb2oct.migrate_member(o_session, n_lb[1], pool[0], member)
 
             # Delete the old neutron-lbaas records
             if (CONF.migration.delete_after_migration and not
