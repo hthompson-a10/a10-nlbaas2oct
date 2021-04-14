@@ -13,7 +13,7 @@ pip install -e .
 
 ## Usage
 
-## Step 1: Copy the config file from the projet to another directory
+## Step 1: Copy the config file from the project to another directory
 ```
 cp /path/to/a10-nlbaas2oct/a10_nlbaas2oct.conf /path/to/another/directory
 ```
@@ -65,6 +65,28 @@ octavia_db_connection = mysql+pymysql://root:password@<b>ip_address_of_remote_ho
 
 # Path to config file. Default is /etc/a10
 a10_config_path = /etc/a10
+</pre>
+
+### Performing cross host migration when A10 database is seperate from Neutron DB and Octavia DB 
+
+<pre>
+# Octavia service account ID or username (ex: admin)
+octavia_account_id = admin
+
+# Connection string for the neutron database
+neutron_db_connection = mysql+pymysql://user:password@127.0.0.1/neutron?charset=utf8
+
+# Connection string for the octavia database
+octavia_db_connection = mysql+pymysql://root:password@<b>ip_address_of_remote_host</b>:3306/octavia
+
+# Path to config file. Default is /etc/a10
+a10_config_path = /etc/a10
+
+# Connection string for the A10 database used in neutron lbaas env
+a10_nlbaas_db_connection = mysql+pymysql://user:password@127.0.0.1/a10_db
+
+# Connection string for the A10 database used in the octavia env
+a10_oct_connection = mysql+pymysql://user:password@<b>ip_address_of_remote_host</b>/a10_db
 </pre>
 
 ## Step 3: Perform the migration
