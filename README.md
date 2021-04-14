@@ -3,6 +3,12 @@ This tool has been designed to migration A10 devices and their associated neutro
 
 ## Installation
 
+### Install from PyPi
+```
+pip install a10-nlbaas2oct
+```
+
+### Install from Source
 ```bash
 git clone git@github.com:a10networks/a10-nlbaas2oct.git
 cd a10-nlbaas2oct
@@ -14,8 +20,15 @@ pip install -e .
 ## Usage
 
 ## Step 1: Copy the config file from the project to another directory
+
+### Installed from PyPi
 ```
-cp /path/to/a10-nlbaas2oct/a10_nlbaas2oct.conf /path/to/another/directory
+pip show a10-nlbaas2oct | grep "Location" | cp $(awk '{print $2}')/a10_nlbaas2oct/a10_nlbaas2oct.conf /path/to/another/directory
+```
+
+### Installed from source
+```
+cp /path/to/a10-nlbaas2oct/a10_nlbaas2oct/a10_nlbaas2oct.conf /path/to/another/directory
 ```
 
 ## Step 2: Modify the config file
