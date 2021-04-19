@@ -20,6 +20,7 @@ import oslo_i18n as i18n
 from oslo_log import log as logging
 from oslo_utils import uuidutils
 
+import acos_client
 from a10_nlbaas2oct import a10_config as a10_cfg
 from a10_nlbaas2oct import a10_migration as aten2oct
 from a10_nlbaas2oct import db_utils
@@ -146,7 +147,12 @@ def main():
                 LOG.info('Skipping loadbalancer with provider %s. Not an A10 Networks LB', n_lb[0])
                 continue
 
-            device_name = aten2oct.get_device_name_by_tenant(a10_nlbaas_session, n_lb[1])
+            if a10_config.get('use_database'):
+                device_name = aten2oct.get_device_name_by_tenant(a10_nlbaas_session, n_lb[1])
+            else:
+                devices = a10_config.get('devices')
+                device_name = acos_client.Hash(list(devices)).get_server(n_lb[1])
+
             LOG.debug('Migrating Thunder device: %s', device_name)
             device_info = a10_config.get_device(device_name)
             try:
@@ -158,7 +164,7 @@ def main():
 
             LOG.info('Migrating VIP port for load balancer: %s', lb_id)
             lb2oct.migrate_vip_ports(n_session, CONF.migration.octavia_account_id, lb_id, n_lb)
-            
+
             LOG.info('Migrating load balancer: %s', lb_id)
             lb2oct.migrate_lb(o_session, lb_id, n_lb)
 
