@@ -55,7 +55,7 @@ def migrate_vip_ports(n_session, oct_accnt_id, lb_id, n_lb):
                 raise Exception(_('Unable to update VIP security group in '
                                   'the neutron database.'))
 
-def migrate_lb(o_session, lb_id, n_lb):
+def migrate_lb(o_session, lb_id, n_lb, fl_id):
     """ 
         Create the load balancer. Provider name is hardcoded.
         This tool is only meant for A10 LB migration. On nlbaas the provider is 'a10networks'
@@ -73,12 +73,12 @@ def migrate_lb(o_session, lb_id, n_lb):
         {'id': lb_id, 'project_id': n_lb[1], 'name': n_lb[2],
          'description': n_lb[3], 'provisioning_status': 'ACTIVE',
          'operating_status': n_lb[5], 'enabled': n_lb[4],
+         'flavor_id': fl_id, 'provider': provider_name,
          'created_at': datetime.datetime.utcnow(),
-         'updated_at': datetime.datetime.utcnow(),
-         'provider': provider_name})
+         'updated_at': datetime.datetime.utcnow()})
     if result.rowcount != 1:
           raise Exception(_('Unable to create load balancer in the '
-                        'Octavia database.'))
+                          'Octavia database.'))
 
 
 def migrate_vip(n_session, o_session, lb_id, n_lb):

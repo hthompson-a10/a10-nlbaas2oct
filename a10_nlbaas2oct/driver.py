@@ -24,6 +24,7 @@ import acos_client
 from a10_nlbaas2oct import a10_config as a10_cfg
 from a10_nlbaas2oct import a10_migration as aten2oct
 from a10_nlbaas2oct import db_utils
+from a10_nlbaas2oct import flavor_migration as nexpr2fl
 from a10_nlbaas2oct import lbaas_migration as lb2oct
 
 _translators = i18n.TranslatorFactory(domain='a10_nlbaas2oct')
@@ -129,6 +130,14 @@ def main():
     a10_config = a10_cfg.A10Config(config_dir=CONF.migration.a10_config_path,
                                    provider="a10networks")
 
+    # Translate the name expressions into an Octavia flavor
+    LOG.info('Migrating name expressions to flavors')
+    fl_id = None
+    flavor_data = nexpr2fl.create_flavor_data(a10_config)
+    if flavor_data
+        fp_id = nexpr2fl.create_flavorprofile(o_session, flavor_data)
+        fl_id = nexpr2fl.create_flavor(o_session, fp_id)
+
     # Migrate the loadbalancers and their child objects
     failure_count = 0
     lb_id_list = db_utils.get_loadbalancer_ids(n_session, conf_lb_id=CONF.lb_id,
@@ -153,7 +162,7 @@ def main():
                 devices = a10_config.get('devices')
                 device_name = acos_client.Hash(list(devices)).get_server(n_lb[1])
 
-            LOG.debug('Migrating Thunder device: %s', device_name)
+            LOG.info('Migrating Thunder device: %s', device_name)
             device_info = a10_config.get_device(device_name)
             try:
                 aten2oct.migrate_thunder(a10_oct_session, lb_id, n_lb[0], device_info)
@@ -166,7 +175,7 @@ def main():
             lb2oct.migrate_vip_ports(n_session, CONF.migration.octavia_account_id, lb_id, n_lb)
 
             LOG.info('Migrating load balancer: %s', lb_id)
-            lb2oct.migrate_lb(o_session, lb_id, n_lb)
+            lb2oct.migrate_lb(o_session, lb_id, n_lb, fl_id)
 
             LOG.info('Migrating VIP for load balancer: %s', lb_id)
             lb2oct.migrate_vip(n_session, o_session, lb_id, n_lb)
