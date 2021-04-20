@@ -134,7 +134,7 @@ def main():
     LOG.info('Migrating name expressions to flavors')
     fl_id = None
     flavor_data = nexpr2fl.create_flavor_data(a10_config)
-    if flavor_data
+    if flavor_data:
         fp_id = nexpr2fl.create_flavorprofile(o_session, flavor_data)
         fl_id = nexpr2fl.create_flavor(o_session, fp_id)
 

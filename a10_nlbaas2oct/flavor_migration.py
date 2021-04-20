@@ -18,15 +18,14 @@ import sys
 from oslo_db.sqlalchemy import enginefacade
 import oslo_i18n as i18n
 from oslo_log import log as logging
-
-from a10_nlbaas2oct import db_utils
+from oslo_utils import uuidutils
 
 
 def _create_flavor_expr(expr_data):
     name_exprs = []
     for k, v in expr_data.items():
         v['description'] = k
-        name_expressions.append(v)
+        name_exprs.append(v)
     return name_exprs
 
 
@@ -66,7 +65,7 @@ def create_flavorprofile(o_session, flavor_data):
         "INSERT INTO flavor_profile (id, name, provider_name, "
         "flavor_data) VALUES (:id, :name, :provider_name, :flavor_data);",
         {'id': flavorprofile_id, 'name': flavorprofile_name,
-         'provider_name': provider_name, 'flavor_data': flavor_data})
+         'provider_name': provider_name, 'flavor_data': str(flavor_data)})
     if result.rowcount != 1:
         raise Exception(_('Unable to create flavorprofile in the '
                         'Octavia database.'))
@@ -77,7 +76,7 @@ def create_flavor(o_session, flavorprofile_id):
     flavor_id = uuidutils.generate_uuid()
     flavor_name = flavor_id[:10]
 
-    result = os.session.execute(
+    result = o_session.execute(
         "INSERT INTO flavor (id, name, enabled, flavor_profile_id) "
         "VALUES (:id, :name, :enabled, :flavor_profile_id);",
         {'id': flavor_id, 'name': flavor_name, 'enabled': 1,
@@ -85,3 +84,4 @@ def create_flavor(o_session, flavorprofile_id):
     if result.rowcount != 1:
         raise Exception(_('Unable to create flavor in the '
                         'Octavia database.'))
+    return flavor_id
