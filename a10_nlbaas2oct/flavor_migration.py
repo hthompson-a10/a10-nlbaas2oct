@@ -22,10 +22,10 @@ from oslo_utils import uuidutils
 
 
 def _create_flavor_expr(expr_data):
-    name_exprs = []
+    name_exprs = {'name-expressions': []}
     for k, v in expr_data.items():
         v['description'] = k
-        name_exprs.append(v)
+        name_exprs['name-expressions'].append(v)
     return name_exprs
 
 
@@ -34,7 +34,7 @@ def create_flavor_data(a10_config):
 
     vs_expr = a10_config.get_virtual_server_expressions()
     if vs_expr:
-        flavor_data['virtual-server'] = _create_flavor_expr(vs_expr)
+        flavor_data['virtual-server'] =  _create_flavor_expr(vs_expr)
 
     vport_expr = a10_config.get_vport_expressions()
     if vport_expr:
@@ -61,11 +61,12 @@ def create_flavorprofile(o_session, flavor_data):
     flavorprofile_name = flavorprofile_id[:10]
     provider_name = 'a10'
 
+    flavor_data = str(flavor_data).replace('\'', '\"')
     result = o_session.execute(
         "INSERT INTO flavor_profile (id, name, provider_name, "
         "flavor_data) VALUES (:id, :name, :provider_name, :flavor_data);",
         {'id': flavorprofile_id, 'name': flavorprofile_name,
-         'provider_name': provider_name, 'flavor_data': str(flavor_data)})
+         'provider_name': provider_name, 'flavor_data': flavor_data})
     if result.rowcount != 1:
         raise Exception(_('Unable to create flavorprofile in the '
                         'Octavia database.'))
