@@ -258,7 +258,9 @@ def main():
             # Delete the old neutron-lbaas records
             if (CONF.migration.delete_after_migration and not
                     CONF.migration.trial_run):
+                LOG.info('Performing cascading delete on loadbalancer %s.', lb_id)
                 db_utils.cascade_delete_neutron_lb(n_session, lb_id)
+                LOG.info('Successful cascading delete of loadbalancer %s.', lb_id)
                 tenant_bindings_to_delete.append(n_lb[0])
             
             # Rollback everything if we are in a trial run otherwise commit
@@ -270,7 +272,7 @@ def main():
             else:
                 o_session.commit()
                 n_session.commit()
-                LOG.info('Migration of load balancer %s successful.', lb_id)
+                LOG.info('Successful migration of load balancer %s.', lb_id)
         except Exception as e:
             n_session.rollback()
             o_session.rollback()
