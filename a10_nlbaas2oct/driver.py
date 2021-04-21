@@ -286,16 +286,16 @@ def main():
     try:
         # We can't be sure when no more loadbalancers with a given tenant exist
         # in the DB. So we have to delete them here.
-        for tenant_binding in tenant_bindings_to_delete:
-            LOG.info('Deleting A10 tenant biding for tenant: %s', tenant_binding)
-            aten2oct.delete_binding_by_tenant(n_session, tenant_binding)
-
-        if CONF.migration.trial_run:
-            n_session.rollback()
-            LOG.info('Simulated deletion of A10 tenant bindings successful.')
-        elif len(tenant_bindings_to_delete) > 0:
-            n_session.commit()
-            LOG.info('Deletion of A10 tenant bindings successful')
+        if a10_config.get('use_database'):
+            for tenant_binding in tenant_bindings_to_delete:
+                LOG.info('Deleting A10 tenant biding for tenant: %s', tenant_binding)
+                aten2oct.delete_binding_by_tenant(n_session, tenant_binding)
+            if CONF.migration.trial_run:
+                n_session.rollback()
+                LOG.info('Simulated deletion of A10 tenant bindings successful.')
+            elif len(tenant_bindings_to_delete) > 0:
+                n_session.commit()
+                LOG.info('Deletion of A10 tenant bindings successful')
     except Exception as e:
         n_session.rollback()
         LOG.exception("Skipping A10 tenant binding deletion due to: %s.", str(e))
