@@ -162,7 +162,7 @@ def main():
                 device_name = aten2oct.get_device_name_by_tenant(a10_nlbaas_session, tenant_id)
             else:
                 devices = a10_config.get('devices')
-                device_name = acos_client.Hash(list(devices)).get_server(n_lb[1])
+                device_name = acos_client.Hash(list(devices)).get_server(tenant_id)
 
             LOG.info('Migrating Thunder device: %s', device_name)
             device_info = a10_config.get_device(device_name)
