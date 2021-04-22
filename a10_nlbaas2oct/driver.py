@@ -152,20 +152,22 @@ def main():
             db_utils.lock_loadbalancer(n_session, lb_id)
 
             n_lb = db_utils.get_loadbalancer_entry(n_session, lb_id)
-            if n_lb[0] != 'a10networks':
-                LOG.info('Skipping loadbalancer with provider %s. Not an A10 Networks LB', n_lb[0])
+            provider = n_lb[0]
+            tenant_id = n_lb[1]
+            if provider != 'a10networks':
+                LOG.info('Skipping loadbalancer with provider %s. Not an A10 Networks LB', provider)
                 continue
 
             if a10_config.get('use_database'):
-                device_name = aten2oct.get_device_name_by_tenant(a10_nlbaas_session, n_lb[1])
+                device_name = aten2oct.get_device_name_by_tenant(a10_nlbaas_session, tenant_id)
             else:
                 devices = a10_config.get('devices')
-                device_name = acos_client.Hash(list(devices)).get_server(n_lb[1])
+                device_name = acos_client.Hash(list(devices)).get_server(tenant_id)
 
             LOG.info('Migrating Thunder device: %s', device_name)
             device_info = a10_config.get_device(device_name)
             try:
-                aten2oct.migrate_thunder(a10_oct_session, lb_id, n_lb[0], device_info)
+                aten2oct.migrate_thunder(a10_oct_session, lb_id, tenant_id, device_info)
             except aten2oct.UnsupportedAXAPIVersionException as e:
                 LOG.warning('Skipping loadbalancer %s for device %s with AXAPI version %s. '
                             'Only AXAPI version 3.0 is supported.',
@@ -184,76 +186,87 @@ def main():
             # Start pool migration
             pools = db_utils.get_pool_entries_by_lb(n_session, lb_id)
             for pool in pools:
-                LOG.debug('Migrating pool: %s', pool[0])
-                if pool[7] == 'DELETED':
+                pool_id = pool[0]
+                pool_state = pool[7]
+                LOG.debug('Migrating pool: %s', pool_id)
+                if pool_state == 'DELETED':
                     continue
-                elif pool[7] != 'ACTIVE':
-                    raise Exception(_('Pool is invalid state of %s.'), pool[7])
+                elif pool_state != 'ACTIVE':
+                    raise Exception(_('Pool is invalid state of %s.'), pool_state)
                 lb2oct.migrate_pools(o_session, lb_id, n_lb, pool)
 
                 hm_id = pool[5]
                 if hm_id is not None:
                     LOG.debug('Migrating health manager: %s', hm_id)
                     hm = db_utils.get_healthmonitor(n_session, hm_id)
-                    lb2oct.migrate_health_monitor(o_session, n_lb[1], pool[0], hm_id, hm)
+                    lb2oct.migrate_health_monitor(o_session, tenant_id, pool_id, hm_id, hm)
 
                 # Handle the session persistence records
-                sp = db_utils.get_sess_pers_by_pool(n_session, pool[0])
+                sp = db_utils.get_sess_pers_by_pool(n_session, pool_id)
                 if sp:
-                    LOG.debug('Migrating session persistence for pool: %s', pool[0])
-                    lb2oct.migrate_session_persistence(o_session, pool[0], sp)
+                    LOG.debug('Migrating session persistence for pool: %s', pool_id)
+                    lb2oct.migrate_session_persistence(o_session, pool_id, sp)
 
                 # Handle the pool members
-                members = db_utils.get_members_by_pool(n_session, pool[0])
+                members = db_utils.get_members_by_pool(n_session, pool_id)
                 for member in members:
-                    LOG.debug('Migrating member: %s', member[0])
-                    if member[6] == 'DELETED':
+                    member_id = member[0]
+                    member_state = member[6]
+                    LOG.debug('Migrating member: %s', member_id)
+                    if member_state == 'DELETED':
                         continue
-                    elif member[6] != 'ACTIVE':
+                    elif member_state != 'ACTIVE':
                         raise Exception(_('Member %s for pool %s is invalid state of %s.'),
-                                        member[0],
+                                        member_id,
                                         pool_id,
-                                        member[6])
-                    lb2oct.migrate_member(o_session, n_lb[1], pool[0], member)
+                                        member_state)
+                    lb2oct.migrate_member(o_session, tenant_id, pool_id, member)
 
             # Start listener migration. Must come after pool due to l7policy fk
             listeners, lb_stats = db_utils.get_listeners_and_stats_by_lb(n_session, lb_id)
             for listener in listeners:
-                LOG.debug('Migrating listener: %s', listener[0])
-                if listener[8] == 'DELETED':
+                listener_id = listener[0]
+                listener_state = listener[8]
+                LOG.debug('Migrating listener: %s', listener_id)
+                if listener_state == 'DELETED':
                     continue
-                elif listener[8] != 'ACTIVE':
+                elif listener_state != 'ACTIVE':
                     raise Exception(_('Listener is invalid state of %s.'),
-                                     listener[8])
+                                     listener_state)
                 lb2oct.migrate_listener(n_session, o_session, lb_id, n_lb, listener, lb_stats)
 
                 # Handle SNI certs
-                SNIs = db_utils.get_SNIs_by_listener(n_session, listener[0])
+                SNIs = db_utils.get_SNIs_by_listener(n_session, listener_id)
                 for SNI in SNIs:
-                    LOG.debug('Migrating SNI: %s', SNI[0])
-                    lb2oct.migrate_SNI(o_session, listener[0], SNI)
+                    sni_id = SNI[0]
+                    LOG.debug('Migrating SNI: %s', sni_id)
+                    lb2oct.migrate_SNI(o_session, listener_id, SNI)
 
                 # Handle L7 policy records
-                l7policies = db_utils.get_l7policies_by_listener(n_session, listener[0])
+                l7policies = db_utils.get_l7policies_by_listener(n_session, listener_id)
                 for l7policy in l7policies:
-                    LOG.debug('Migrating L7 policy: %s', l7policy[0])
-                    if l7policy[8] == 'DELETED':
+                    l7policy_id = l7policy[0]
+                    l7policy_state = l7policy[8]
+                    LOG.debug('Migrating L7 policy: %s', l7policy_id)
+                    if l7policy_state == 'DELETED':
                         continue
-                    elif l7policy[8] != 'ACTIVE':
+                    elif l7policy_state != 'ACTIVE':
                         raise Exception(_('L7 policy is invalid state of %s.'),
-                                        l7policy[8])                    
-                    lb2oct.migrate_l7policy(o_session, n_lb[1], listener[0], l7policy)
+                                        l7policy_state)                    
+                    lb2oct.migrate_l7policy(o_session, tenant_id, listener_id, l7policy)
                     
                      # Handle L7 rule records
-                    l7rules = db_utils.get_l7rules_by_l7policy(n_session, l7policy[0])
+                    l7rules = db_utils.get_l7rules_by_l7policy(n_session, l7policy_id)
                     for l7rule in l7rules:
-                        LOG.debug('Migrating L7 rule: %s', l7rule[0])
-                        if l7rule[6] == 'DELETED':
+                        l7rule_id = l7rule[0]
+                        l7rule_state = l7rule[6]
+                        LOG.debug('Migrating L7 rule: %s', l7rule_id)
+                        if l7rule_state == 'DELETED':
                             continue
-                        elif l7rule[6] != 'ACTIVE':
+                        elif l7rule_state != 'ACTIVE':
                             raise Exception(_('L7 rule is invalid state of %s.'),
-                                            l7rule[6])
-                        lb2oct.migrate_l7rule(o_session, n_lb[1], l7policy, l7rule)
+                                            l7rule_state)
+                        lb2oct.migrate_l7rule(o_session, tenant_id, l7policy, l7rule)
 
             # Delete the old neutron-lbaas records
             if (CONF.migration.delete_after_migration and not
@@ -261,7 +274,7 @@ def main():
                 LOG.info('Performing cascading delete on loadbalancer %s.', lb_id)
                 db_utils.cascade_delete_neutron_lb(n_session, lb_id)
                 LOG.info('Successful cascading delete of loadbalancer %s.', lb_id)
-                tenant_bindings_to_delete.append(n_lb[0])
+                tenant_bindings_to_delete.append(tenant_id)
             
             # Rollback everything if we are in a trial run otherwise commit
             if CONF.migration.trial_run:
