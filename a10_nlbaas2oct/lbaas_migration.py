@@ -66,14 +66,14 @@ def migrate_lb(o_session, lb_id, n_lb, fl_id):
 
     result = o_session.execute(
         "INSERT INTO load_balancer (id, project_id, name, "
-        "description, provisioning_status, operating_status, enabled, "
+        "description, provisioning_status, operating_status, enabled, topology, "
         "created_at, updated_at, flavor_id, provider) VALUES (:id, :project_id, "
-        ":name, :description, :provisioning_status, "
-        ":operating_status, :enabled, :created_at, :updated_at, "
-        ":flavor_id, :provider);",
+        ":name, :description, :provisioning_status, :operating_status, :enabled, "
+        ":topology, :created_at, :updated_at, :flavor_id, :provider);",
         {'id': lb_id, 'project_id': n_lb[1], 'name': n_lb[2],
          'description': n_lb[3], 'provisioning_status': 'ACTIVE',
          'operating_status': n_lb[5], 'enabled': n_lb[4],
+         'topology': 'SINGLE',
          'created_at': datetime.datetime.utcnow(),
          'updated_at': datetime.datetime.utcnow(),
          'flavor_id': fl_id, 'provider': provider_name,})
