@@ -13,6 +13,16 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
+import oslo_i18n as i18n
+from oslo_log import log as logging
+
+_translators = i18n.TranslatorFactory(domain='a10_nlbaas2oct')
+# The primary translation function using the well-known name "_"
+_ = _translators.primary
+
+LOG = logging.getLogger('a10_nlbaas2oct')
+
+
 def lock_loadbalancer(n_session, lb_id):
     # Lock the load balancer in neutron DB
     result = n_session.execute(
@@ -23,6 +33,7 @@ def lock_loadbalancer(n_session, lb_id):
         raise Exception(_('Load balancer is not provisioning_status '
                         'ACTIVE'))
 
+
 def unlock_loadbalancer(n_session, lb_id):
     # Unlock the load balancer in neutron DB
     result = n_session.execute(
@@ -30,19 +41,28 @@ def unlock_loadbalancer(n_session, lb_id):
         "provisioning_status = 'ACTIVE' WHERE id = :id AND "
         "provisioning_status = 'PENDING_UPDATE';", {'id': lb_id})
 
-def get_loadbalancer_ids(n_session, conf_lb_id=None, conf_project_id=None):
+
+def get_loadbalancer_ids(n_session, conf_lb_id_list=[], conf_project_id=None):
     lb_id_list = []
-    if conf_lb_id:
-        lb_id = n_session.execute(
-            "SELECT id FROM neutron.lbaas_loadbalancers WHERE "
-            "id = :id AND provisioning_status = 'ACTIVE';",
-            {'id': conf_lb_id}).fetchall()
-        if not lb_id:
-            error_msg = ('Loadbalancer with ID {} could not be found. '
-                         'Please ensure you are using the UUID '
-                         'instead of the name.').format(conf_lb_id)
-            raise Exception(_(error_msg))
-        lb_id_list = lb_id
+    if conf_lb_id_list:
+        for conf_lb_id in conf_lb_id_list:
+            lb_id = n_session.execute(
+                "SELECT id FROM neutron.lbaas_loadbalancers WHERE "
+                "id = :id AND provisioning_status = 'ACTIVE';",
+                {'id': conf_lb_id}).fetchall()
+            if not lb_id:
+                lb_id = n_session.execute(
+                    "SELECT id FROM neutron.lbaas_loadbalancers WHERE id = :id;",
+                    {'id': conf_lb_id}).fetchall()
+                if lb_id:
+                    error_msg = ('Loadbalancer with ID {} not '
+                                 'in provisioning state ACTIVE. ').format(conf_lb_id)
+                else:
+                    error_msg = ('Loadbalancer with ID {} could not be found. '
+                                 'Please ensure you are using the UUID '
+                                 'instead of the name.').format(conf_lb_id)
+                raise Exception(_(error_msg))
+            lb_id_list.append(lb_id[0])
     elif conf_project_id:
         lb_id_list = n_session.execute(
             "SELECT id FROM neutron.lbaas_loadbalancers WHERE "
@@ -53,6 +73,7 @@ def get_loadbalancer_ids(n_session, conf_lb_id=None, conf_project_id=None):
             "SELECT id FROM neutron.lbaas_loadbalancers WHERE "
             "provisioning_status = 'ACTIVE';").fetchall()
     return lb_id_list
+
 
 def get_loadbalancer_entry(n_session, lb_id):
     # Get the load balancer record from neutron
@@ -65,12 +86,12 @@ def get_loadbalancer_entry(n_session, lb_id):
         {'id': lb_id}).fetchone()
     return n_lb
 
+
 def get_listeners_and_stats_by_lb(n_session, lb_id):
     lb_stats = n_session.execute(
         "SELECT bytes_in, bytes_out, active_connections, "
         "total_connections FROM lbaas_loadbalancer_statistics WHERE "
         "loadbalancer_id = :lb_id;", {'lb_id': lb_id}).fetchone()
-
     listeners = n_session.execute(
         "SELECT id, name, description, protocol, protocol_port, "
         "connection_limit, default_pool_id, admin_state_up, "
@@ -79,11 +100,13 @@ def get_listeners_and_stats_by_lb(n_session, lb_id):
         "loadbalancer_id = :lb_id;", {'lb_id': lb_id}).fetchall()
     return listeners, lb_stats
 
+
 def get_SNIs_by_listener(n_session, listener_id):
     SNIs = n_session.execute(
         "SELECT tls_container_id, position FROM lbaas_sni WHERE "
         "listener_id = :listener_id;", {'listener_id': listener_id}).fetchall()
     return SNIs
+
 
 def get_l7policies_by_listener(n_session, listener_id):
     l7policies = n_session.execute(
@@ -95,6 +118,7 @@ def get_l7policies_by_listener(n_session, listener_id):
         {'listener_id': listener_id}).fetchall()
     return l7policies
 
+
 def get_l7rules_by_l7policy(n_session, l7policy_id):
     l7rules = n_session.execute(
         "SELECT id, type, compare_type, invert, `key`, value, "
@@ -102,6 +126,7 @@ def get_l7rules_by_l7policy(n_session, l7policy_id):
         "l7policy_id = :l7policy_id AND provisioning_status = 'ACTIVE';",
         {'l7policy_id': l7policy_id}).fetchall()
     return l7rules
+
 
 def get_pool_entries_by_lb(n_session, lb_id):
     pools = n_session.execute(
@@ -112,11 +137,13 @@ def get_pool_entries_by_lb(n_session, lb_id):
         {'lb_id': lb_id}).fetchall()
     return pools
 
+
 def get_sess_pers_by_pool(n_session, pool_id):
     sp = n_session.execute(
         "SELECT type, cookie_name FROM lbaas_sessionpersistences "
         "WHERE pool_id = :pool_id;", {'pool_id': pool_id}).fetchone()
     return sp
+
 
 def get_members_by_pool(n_session, pool_id):
     members = n_session.execute(
@@ -125,6 +152,7 @@ def get_members_by_pool(n_session, pool_id):
         "lbaas_members WHERE pool_id = :pool_id;",
         {'pool_id': pool_id}).fetchall()
     return members
+
 
 def get_healthmonitor(n_session, hm_id):
     hm = n_session.execute(
@@ -137,6 +165,7 @@ def get_healthmonitor(n_session, hm_id):
         raise Exception(_('Health monitor %s has invalid '
                         'provisioning_status.'), hm_id)
     return hm
+
 
 def cascade_delete_neutron_lb(n_session, lb_id):
     listeners = n_session.execute(

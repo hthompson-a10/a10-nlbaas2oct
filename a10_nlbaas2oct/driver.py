@@ -18,7 +18,6 @@ from oslo_config import cfg
 from oslo_db.sqlalchemy import enginefacade
 import oslo_i18n as i18n
 from oslo_log import log as logging
-from oslo_utils import uuidutils
 
 import acos_client
 from a10_nlbaas2oct import a10_config as a10_cfg
@@ -47,6 +46,8 @@ migration_opts = [
     cfg.BoolOpt('delete_after_migration', default=False,
                 help='Delete the load balancer records from neutron-lbaas'
                      ' after migration'),
+    cfg.ListOpt('lb_id_list',
+                help='List of loadbalancer id\'s to migrate'),
     cfg.BoolOpt('trial_run', default=False,
                 help='Run without making changes.'),
     cfg.StrOpt('octavia_account_id', required=True,
@@ -86,13 +87,18 @@ def main():
     LOG = logging.getLogger('a10_nlbaas2oct')
     CONF.log_opt_values(LOG, logging.DEBUG)
 
-    if not CONF.all and not CONF.lb_id and not CONF.project_id:
-        print('Error: One of --all, --lb_id, --project_id must be specified.')
+    if not CONF.all and not CONF.lb_id and not CONF.project_id and not CONF.migration.lb_id_list:
+        print('Error: One of --all, --lb_id, --project_id must be '
+              'specified or lb_id_list must be set in the config file.')
         return 1
 
-    if ((CONF.all and (CONF.lb_id or CONF.project_id)) or
-            (CONF.lb_id and CONF.project_id)):
-        print('Error: Only one of --all, --lb_id, --project_id allowed.')
+    if ((CONF.all and (CONF.lb_id or CONF.project_id or CONF.migration.lb_id_list)) or
+            (CONF.lb_id and CONF.project_id) or
+            (CONF.migration.lb_id_list and CONF.project_id)):
+        if CONF.lb_id_list:
+            print('Error: Only --lb-id is allowed with lb_id_list set in the config file.')
+        else:
+            print('Error: Only one of --all, --lb-id, --project-id allowed.')
         return 1
 
     neutron_context_manager = enginefacade.transaction_context()
@@ -140,7 +146,12 @@ def main():
 
     # Migrate the loadbalancers and their child objects
     failure_count = 0
-    lb_id_list = db_utils.get_loadbalancer_ids(n_session, conf_lb_id=CONF.lb_id,
+
+    conf_lb_id_list = CONF.migration.lb_id_list
+    if CONF.lb_id:
+        conf_lb_id_list.append(CONF.lb_id)
+
+    lb_id_list = db_utils.get_loadbalancer_ids(n_session, conf_lb_id_list=conf_lb_id_list,
                                                conf_project_id=CONF.project_id)
     tenant_bindings_to_delete = []
     for lb_id in lb_id_list:
