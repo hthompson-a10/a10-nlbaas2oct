@@ -14,13 +14,14 @@
 #    under the License.
 
 import datetime
-import sys
-
-from oslo_db.sqlalchemy import enginefacade
 import oslo_i18n as i18n
-from oslo_log import log as logging
 
 from a10_nlbaas2oct import db_utils
+
+_translators = i18n.TranslatorFactory(domain='a10_nlbaas2oct')
+
+# The primary translation function using the well-known name "_"
+_ = _translators.primary
 
 
 def migrate_vip_ports(n_session, oct_accnt_id, lb_id, n_lb):
@@ -55,6 +56,7 @@ def migrate_vip_ports(n_session, oct_accnt_id, lb_id, n_lb):
             if result.rowcount != 1:
                 raise Exception(_('Unable to update VIP security group in '
                                   'the neutron database.'))
+
 
 def migrate_lb(o_session, lb_id, n_lb, fl_id):
     """ 
