@@ -12,12 +12,6 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-import datetime
-import sys
-
-from oslo_db.sqlalchemy import enginefacade
-import oslo_i18n as i18n
-from oslo_log import log as logging
 from oslo_utils import uuidutils
 
 
@@ -29,8 +23,8 @@ def _create_flavor_expr(expr_data):
     return name_exprs
 
 
-def create_flavor_data(a10_config):
-    flavor_data = {}
+def create_flavor_data(a10_config, device_name):
+    flavor_data = {'device-name': device_name}
 
     vs_expr = a10_config.get_virtual_server_expressions()
     if vs_expr:
