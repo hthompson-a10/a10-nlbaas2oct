@@ -40,6 +40,8 @@ cli_opts = [
                help='Load balancer ID to migrate'),
     cfg.StrOpt('project-id',
                help='Migrate all load balancers owned by this project'),
+    cfg.StrOpt('cleanup',
+               help='Delete Neutron LBaaS db entries'),
 ]
 
 migration_opts = [
@@ -73,34 +75,174 @@ cfg.CONF.register_cli_opts(cli_opts)
 cfg.CONF.register_opts(migration_opts, group='migration')
 
 
-def main():
-    if len(sys.argv) == 1:
-        print('Error: Config file must be specified.')
-        print('a10_nlbaas2oct --config-file <filename>')
-        return 1
-    logging.register_options(cfg.CONF)
-    cfg.CONF(args=sys.argv[1:],
-             project='a10_nlbaas2oct',
-             version='a10_nlbaas2oct 1.0')
-    logging.set_defaults()
-    logging.setup(cfg.CONF, 'a10_nlbaas2oct')
-    LOG = logging.getLogger('a10_nlbaas2oct')
-    CONF.log_opt_values(LOG, logging.DEBUG)
+def _migrate_flavor(LOG, a10_config, o_session, device_name):
+    # Translate the name expressions into an Octavia flavor
+    LOG.info('Migrating name expressions to flavors')
+    fl_id = None
+    try:
+        flavor_data = nexpr2fl.create_flavor_data(a10_config, device_name)
+        if flavor_data:
+            fp_id = nexpr2fl.create_flavorprofile(o_session, flavor_data)
+            fl_id = nexpr2fl.create_flavor(o_session, fp_id)
+    except Exception as e:
+        LOG.exception("Skipping flavor migration due to: %s.", str(e))
+        raise Exception
+    return fl_id
 
-    if not CONF.all and not CONF.lb_id and not CONF.project_id and not CONF.migration.lb_id_list:
-        print('Error: One of --all, --lb_id, --project_id must be '
-              'specified or lb_id_list must be set in the config file.')
-        return 1
 
-    if ((CONF.all and (CONF.lb_id or CONF.project_id or CONF.migration.lb_id_list)) or
-            (CONF.lb_id and CONF.project_id) or
-            (CONF.migration.lb_id_list and CONF.project_id)):
-        if CONF.lb_id_list:
-            print('Error: Only --lb-id is allowed with lb_id_list set in the config file.')
-        else:
-            print('Error: Only one of --all, --lb-id, --project-id allowed.')
-        return 1
+def _migrate_device(LOG, a10_config, n_session, o_session, lb_id, tenant_id):
+    if a10_config.get('use_database'):
+        device_name = aten2oct.get_device_name_by_tenant(n_session, tenant_id)
+    else:
+        devices = a10_config.get('devices')
+        device_name = acos_client.Hash(list(devices)).get_server(tenant_id)
+    LOG.info('Migrating Thunder device: %s', device_name)
+    device_info = a10_config.get_device(device_name)
 
+    try:
+        aten2oct.migrate_thunder(o_session, lb_id, tenant_id, device_info)
+    except aten2oct.UnsupportedAXAPIVersionException as e:
+        LOG.warning('Skipping loadbalancer %s for device %s with AXAPI version %s. '
+                    'Only AXAPI version 3.0 is supported.',
+                    lb_id, device_name, e.axapi_version)
+        return
+    return device_name
+
+
+def _migrate_slb(LOG, a10_config, n_session, o_session, lb_id, fl_id, tenant_id, n_lb):
+
+    LOG.info('Migrating VIP port for load balancer: %s', lb_id)
+    lb2oct.migrate_vip_ports(n_session, CONF.migration.octavia_account_id, lb_id, n_lb)
+
+    LOG.info('Migrating load balancer: %s', lb_id)
+    lb2oct.migrate_lb(o_session, lb_id, n_lb, fl_id)
+
+    LOG.info('Migrating VIP for load balancer: %s', lb_id)
+    lb2oct.migrate_vip(n_session, o_session, lb_id, n_lb)
+
+    # Start pool migration
+    pools = db_utils.get_pool_entries_by_lb(n_session, lb_id)
+    for pool in pools:
+        pool_id = pool[0]
+        pool_state = pool[7]
+        LOG.debug('Migrating pool: %s', pool_id)
+        if pool_state == 'DELETED':
+            continue
+        elif pool_state != 'ACTIVE':
+            raise Exception(_('Pool is invalid state of %s.'), pool_state)
+        lb2oct.migrate_pools(o_session, lb_id, n_lb, pool)
+
+        hm_id = pool[5]
+        if hm_id is not None:
+            LOG.debug('Migrating health manager: %s', hm_id)
+            hm = db_utils.get_healthmonitor(n_session, hm_id)
+            lb2oct.migrate_health_monitor(o_session, tenant_id, pool_id, hm_id, hm)
+
+        # Handle the session persistence records
+        sp = db_utils.get_sess_pers_by_pool(n_session, pool_id)
+        if sp:
+            LOG.debug('Migrating session persistence for pool: %s', pool_id)
+            lb2oct.migrate_session_persistence(o_session, pool_id, sp)
+
+        # Handle the pool members
+        members = db_utils.get_members_by_pool(n_session, pool_id)
+        for member in members:
+            member_id = member[0]
+            member_state = member[6]
+            LOG.debug('Migrating member: %s', member_id)
+            if member_state == 'DELETED':
+                continue
+            elif member_state != 'ACTIVE':
+                raise Exception(_('Member %s for pool %s is invalid state of %s.'),
+                                member_id,
+                                pool_id,
+                                member_state)
+            lb2oct.migrate_member(o_session, tenant_id, pool_id, member)
+
+    # Start listener migration. Must come after pool due to l7policy fk
+    listeners, lb_stats = db_utils.get_listeners_and_stats_by_lb(n_session, lb_id)
+    for listener in listeners:
+        listener_id = listener[0]
+        listener_state = listener[8]
+        LOG.debug('Migrating listener: %s', listener_id)
+        if listener_state == 'DELETED':
+            continue
+        elif listener_state != 'ACTIVE':
+            raise Exception(_('Listener is invalid state of %s.'),
+                             listener_state)
+        lb2oct.migrate_listener(n_session, o_session, lb_id, n_lb, listener, lb_stats)
+
+        # Handle SNI certs
+        SNIs = db_utils.get_SNIs_by_listener(n_session, listener_id)
+        for SNI in SNIs:
+            sni_id = SNI[0]
+            LOG.debug('Migrating SNI: %s', sni_id)
+            lb2oct.migrate_SNI(o_session, listener_id, SNI)
+
+        # Handle L7 policy records
+        l7policies = db_utils.get_l7policies_by_listener(n_session, listener_id)
+        for l7policy in l7policies:
+            l7policy_id = l7policy[0]
+            l7policy_state = l7policy[8]
+            LOG.debug('Migrating L7 policy: %s', l7policy_id)
+            if l7policy_state == 'DELETED':
+                continue
+            elif l7policy_state != 'ACTIVE':
+                raise Exception(_('L7 policy is invalid state of %s.'),
+                                l7policy_state)                    
+            lb2oct.migrate_l7policy(o_session, tenant_id, listener_id, l7policy)
+            
+            # Handle L7 rule records
+            l7rules = db_utils.get_l7rules_by_l7policy(n_session, l7policy_id)
+            for l7rule in l7rules:
+                l7rule_id = l7rule[0]
+                l7rule_state = l7rule[6]
+                LOG.debug('Migrating L7 rule: %s', l7rule_id)
+                if l7rule_state == 'DELETED':
+                    continue
+                elif l7rule_state != 'ACTIVE':
+                    raise Exception(_('L7 rule is invalid state of %s.'),
+                                    l7rule_state)
+                lb2oct.migrate_l7rule(o_session, tenant_id, l7policy, l7rule)
+
+
+def _cleanup_slb(LOG, n_session, lb_id, cleanup=False):
+    # Delete the old neutron-lbaas records
+    if not CONF.migration.delete_after_migration and not cleanup:
+        return
+
+    LOG.info('Performing cascading delete on loadbalancer %s.', lb_id)
+    db_utils.cascade_delete_neutron_lb(n_session, lb_id)
+    LOG.info('Successful cascading delete of loadbalancer %s.', lb_id)
+
+
+def _cleanup_tenant_bindings(LOG, n_session, a10_config, tenant_bindings, cleanup=False):
+    failure_count = 0
+    if not CONF.migration.delete_after_migration and not cleanup:
+        return failure_count
+
+    try:
+        # We can't be sure when no more loadbalancers with a given tenant exist
+        # in the DB. So we have to delete them here.
+        if a10_config.get('use_database'):
+            for tenant_binding in tenant_bindings:
+                LOG.info('Deleting A10 tenant biding for tenant: %s', tenant_binding)
+                aten2oct.delete_binding_by_tenant(n_session, tenant_binding)
+            if CONF.migration.trial_run:
+                n_session.rollback()
+                LOG.info('Simulated deletion of A10 tenant bindings successful.')
+            elif len(tenant_bindings) > 0:
+                n_session.commit()
+                LOG.info('Deletion of A10 tenant bindings successful')
+    except Exception as e:
+        n_session.rollback()
+        LOG.exception("Skipping A10 tenant binding deletion due to: %s.", str(e))
+        failure_count += 1
+
+    return failure_count
+
+
+def _setup_db_sessions():
     neutron_context_manager = enginefacade.transaction_context()
     neutron_context_manager.configure(
         connection=CONF.migration.neutron_db_connection)
@@ -130,173 +272,114 @@ def main():
         a10_oct_session = a10_oct_session_maker(autocommit=False)
     else:
         a10_oct_session = o_session
+    
+    return a10_nlbaas_session, a10_oct_session
 
-    LOG.info('Starting migration.')
 
+def _cleanup_confirmation(LOG):
+    print("WARNING: This is a destructive action. Neutron LBaaS entires will be permanently deleteind")
+    full_success_msg = None
+    lb_success_msg = None
+    while resp != "no" or resp != "yes":
+        resp = input("Are you sure you want to delete? [yes/no]").lower()
+        if resp == "no":
+            return
+        elif resp == "yes":
+            LOG.info('=== Starting cleanup ===')
+            full_success_msg = '\n\nCleanup completed successfully'
+            lb_success_msg = 'cleanup of loadbalancer %s'
+        else:
+            print("Please enter 'yes' or 'no'")
+    return full_success_msg, lb_success_msg
+
+
+def main():
+    if len(sys.argv) == 1:
+        print('Error: Config file must be specified.')
+        print('a10_nlbaas2oct --config-file <filename>')
+        return 1
+    logging.register_options(cfg.CONF)
+    cfg.CONF(args=sys.argv[1:],
+             project='a10_nlbaas2oct',
+             version='a10_nlbaas2oct 1.0')
+    logging.set_defaults()
+    logging.setup(cfg.CONF, 'a10_nlbaas2oct')
+    LOG = logging.getLogger('a10_nlbaas2oct')
+    CONF.log_opt_values(LOG, logging.DEBUG)
+
+    XOR_CLI_COMMANDS = (CONF.all, CONF.lb_id, CONF.project_id)
+
+    if not any(XOR_CLI_COMMANDS) and not CONF.migration.lb_id_list:
+        print('Error: One of --all, --lb_id, --project_id must be '
+              'specified or lb_id_list must be set in the config file.')
+        return 1        
+
+    check_multi = lambda x: bool(x)
+    commands = list(filter(check_multi, XOR_CLI_COMMANDS))
+    if len(commands) > 1:
+        print('Error: Only one of --all, --lb-id, --project-id allowed.')
+        return 1
+    elif len(commands) == 1:
+        if CONF.lb_id_list and not (CONF.lb_id or CONF.cleanup):
+            print('Error: Only --lb-id and --cleanup are allowed with lb_id_list set in the config file.')
+            return
+
+    CLEANUP_ONLY = False
+    if CONF.cleanup:
+        full_success_msg, lb_success_msg = _cleanup_confirmation()
+        if full_success_msg and lb_success_msg:
+            CLEANUP_ONLY = True
+        else:
+            print('Exiting...')
+            return
+    else:
+        LOG.info('=== Starting migration ===')
+        full_success_msg = '\n\nMigration completed successfully'
+        lb_success_msg = 'migration of loadbalancer %s'
+
+    n_session, o_session = _setup_db_sessions()
     a10_config = a10_cfg.A10Config(config_dir=CONF.migration.a10_config_path,
                                    provider="a10networks")
-
-    # Translate the name expressions into an Octavia flavor
-    LOG.info('Migrating name expressions to flavors')
-    fl_id = None
-    flavor_data = nexpr2fl.create_flavor_data(a10_config)
-    if flavor_data:
-        fp_id = nexpr2fl.create_flavorprofile(o_session, flavor_data)
-        fl_id = nexpr2fl.create_flavor(o_session, fp_id)
-
-    # Migrate the loadbalancers and their child objects
-    failure_count = 0
 
     conf_lb_id_list = CONF.migration.lb_id_list
     if CONF.lb_id:
         conf_lb_id_list.append(CONF.lb_id)
-
     lb_id_list = db_utils.get_loadbalancer_ids(n_session, conf_lb_id_list=conf_lb_id_list,
                                                conf_project_id=CONF.project_id)
-    tenant_bindings_to_delete = []
+    fl_id = None
+    failure_count = 0
+    tenant_bindings = []
+    curr_device_name = None
     for lb_id in lb_id_list:
+        lb_id = lb_id[0]
         try:
-            lb_id = lb_id[0]
-            # TODO: Preform a lookup of the associated device and cache it's name 
-            # and associated tenant_id
-            LOG.info('Locking load balancer: %s', lb_id)
+            LOG.info('Locking Neutron LBaaS load balancer: %s', lb_id)
             db_utils.lock_loadbalancer(n_session, lb_id)
-
             n_lb = db_utils.get_loadbalancer_entry(n_session, lb_id)
             provider = n_lb[0]
             tenant_id = n_lb[1]
             if provider != 'a10networks':
-                LOG.info('Skipping loadbalancer with provider %s. Not an A10 Networks LB', provider)
-                continue
+                LOG.info('Skipping loadbalancer with provider %s. Not an A10 Networks loadbalancer.', provider)
+                return
+            tenant_bindings.append(tenant_id)
 
-            if a10_config.get('use_database'):
-                device_name = aten2oct.get_device_name_by_tenant(a10_nlbaas_session, tenant_id)
-            else:
-                devices = a10_config.get('devices')
-                device_name = acos_client.Hash(list(devices)).get_server(tenant_id)
+            if not CLEANUP_ONLY:
+                device_name = _migrate_device(LOG, a10_config, n_session, o_session, lb_id, tenant_id)
+                if device_name != curr_device_name:
+                    fl_id = _migrate_flavor(LOG, a10_config, o_session, device_name)
+                    curr_device_name = device_name
+                _migrate_slb(LOG, a10_config, n_session, o_session, lb_id, fl_id, tenant_id, n_lb)
+            _cleanup_slb(LOG, n_session, lb_id, CLEANUP_ONLY)
 
-            LOG.info('Migrating Thunder device: %s', device_name)
-            device_info = a10_config.get_device(device_name)
-            try:
-                aten2oct.migrate_thunder(a10_oct_session, lb_id, tenant_id, device_info)
-            except aten2oct.UnsupportedAXAPIVersionException as e:
-                LOG.warning('Skipping loadbalancer %s for device %s with AXAPI version %s. '
-                            'Only AXAPI version 3.0 is supported.',
-                            lb_id, device_name, e.axapi_version)
-
-            LOG.info('Migrating VIP port for load balancer: %s', lb_id)
-            lb2oct.migrate_vip_ports(n_session, CONF.migration.octavia_account_id, lb_id, n_lb)
-
-            LOG.info('Migrating load balancer: %s', lb_id)
-            lb2oct.migrate_lb(o_session, lb_id, n_lb, fl_id)
-
-            LOG.info('Migrating VIP for load balancer: %s', lb_id)
-            lb2oct.migrate_vip(n_session, o_session, lb_id, n_lb)
-
-
-            # Start pool migration
-            pools = db_utils.get_pool_entries_by_lb(n_session, lb_id)
-            for pool in pools:
-                pool_id = pool[0]
-                pool_state = pool[7]
-                LOG.debug('Migrating pool: %s', pool_id)
-                if pool_state == 'DELETED':
-                    continue
-                elif pool_state != 'ACTIVE':
-                    raise Exception(_('Pool is invalid state of %s.'), pool_state)
-                lb2oct.migrate_pools(o_session, lb_id, n_lb, pool)
-
-                hm_id = pool[5]
-                if hm_id is not None:
-                    LOG.debug('Migrating health manager: %s', hm_id)
-                    hm = db_utils.get_healthmonitor(n_session, hm_id)
-                    lb2oct.migrate_health_monitor(o_session, tenant_id, pool_id, hm_id, hm)
-
-                # Handle the session persistence records
-                sp = db_utils.get_sess_pers_by_pool(n_session, pool_id)
-                if sp:
-                    LOG.debug('Migrating session persistence for pool: %s', pool_id)
-                    lb2oct.migrate_session_persistence(o_session, pool_id, sp)
-
-                # Handle the pool members
-                members = db_utils.get_members_by_pool(n_session, pool_id)
-                for member in members:
-                    member_id = member[0]
-                    member_state = member[6]
-                    LOG.debug('Migrating member: %s', member_id)
-                    if member_state == 'DELETED':
-                        continue
-                    elif member_state != 'ACTIVE':
-                        raise Exception(_('Member %s for pool %s is invalid state of %s.'),
-                                        member_id,
-                                        pool_id,
-                                        member_state)
-                    lb2oct.migrate_member(o_session, tenant_id, pool_id, member)
-
-            # Start listener migration. Must come after pool due to l7policy fk
-            listeners, lb_stats = db_utils.get_listeners_and_stats_by_lb(n_session, lb_id)
-            for listener in listeners:
-                listener_id = listener[0]
-                listener_state = listener[8]
-                LOG.debug('Migrating listener: %s', listener_id)
-                if listener_state == 'DELETED':
-                    continue
-                elif listener_state != 'ACTIVE':
-                    raise Exception(_('Listener is invalid state of %s.'),
-                                     listener_state)
-                lb2oct.migrate_listener(n_session, o_session, lb_id, n_lb, listener, lb_stats)
-
-                # Handle SNI certs
-                SNIs = db_utils.get_SNIs_by_listener(n_session, listener_id)
-                for SNI in SNIs:
-                    sni_id = SNI[0]
-                    LOG.debug('Migrating SNI: %s', sni_id)
-                    lb2oct.migrate_SNI(o_session, listener_id, SNI)
-
-                # Handle L7 policy records
-                l7policies = db_utils.get_l7policies_by_listener(n_session, listener_id)
-                for l7policy in l7policies:
-                    l7policy_id = l7policy[0]
-                    l7policy_state = l7policy[8]
-                    LOG.debug('Migrating L7 policy: %s', l7policy_id)
-                    if l7policy_state == 'DELETED':
-                        continue
-                    elif l7policy_state != 'ACTIVE':
-                        raise Exception(_('L7 policy is invalid state of %s.'),
-                                        l7policy_state)                    
-                    lb2oct.migrate_l7policy(o_session, tenant_id, listener_id, l7policy)
-                    
-                     # Handle L7 rule records
-                    l7rules = db_utils.get_l7rules_by_l7policy(n_session, l7policy_id)
-                    for l7rule in l7rules:
-                        l7rule_id = l7rule[0]
-                        l7rule_state = l7rule[6]
-                        LOG.debug('Migrating L7 rule: %s', l7rule_id)
-                        if l7rule_state == 'DELETED':
-                            continue
-                        elif l7rule_state != 'ACTIVE':
-                            raise Exception(_('L7 rule is invalid state of %s.'),
-                                            l7rule_state)
-                        lb2oct.migrate_l7rule(o_session, tenant_id, l7policy, l7rule)
-
-            # Delete the old neutron-lbaas records
-            if (CONF.migration.delete_after_migration and not
-                    CONF.migration.trial_run):
-                LOG.info('Performing cascading delete on loadbalancer %s.', lb_id)
-                db_utils.cascade_delete_neutron_lb(n_session, lb_id)
-                LOG.info('Successful cascading delete of loadbalancer %s.', lb_id)
-                tenant_bindings_to_delete.append(tenant_id)
-            
             # Rollback everything if we are in a trial run otherwise commit
             if CONF.migration.trial_run:
                 o_session.rollback()
                 n_session.rollback()
-                LOG.info('Simulated migration of load balancer %s successful.',
-                         lb_id)
+                LOG.info('Simulated ' + lb_success_msg + ' successful', lb_id)
             else:
                 o_session.commit()
                 n_session.commit()
-                LOG.info('Successful migration of load balancer %s.', lb_id)
+                LOG.info('Successful ' + lb_success_msg, lb_id)
         except Exception as e:
             n_session.rollback()
             o_session.rollback()
@@ -305,31 +388,18 @@ def main():
         finally:
             # Attempt to unlock the loadbalancer even if an error occured or it was deleted.
             # This ensures we don't get stuck in pending states
-            LOG.info('Unlocking load balancer: %s', lb_id)
+            LOG.info('Unlocking Neutron LBaaS load balancer: %s', lb_id)
             db_utils.unlock_loadbalancer(n_session, lb_id)
             n_session.commit()
 
-    try:
-        # We can't be sure when no more loadbalancers with a given tenant exist
-        # in the DB. So we have to delete them here.
-        if a10_config.get('use_database'):
-            for tenant_binding in tenant_bindings_to_delete:
-                LOG.info('Deleting A10 tenant biding for tenant: %s', tenant_binding)
-                aten2oct.delete_binding_by_tenant(n_session, tenant_binding)
-            if CONF.migration.trial_run:
-                n_session.rollback()
-                LOG.info('Simulated deletion of A10 tenant bindings successful.')
-            elif len(tenant_bindings_to_delete) > 0:
-                n_session.commit()
-                LOG.info('Deletion of A10 tenant bindings successful')
-    except Exception as e:
-        n_session.rollback()
-        LOG.exception("Skipping A10 tenant binding deletion due to: %s.", str(e))
-        failure_count += 1
+    failure_count += _cleanup_tenant_bindings(LOG, n_session, a10_config,
+                                              tenant_bindings, CLEANUP_ONLY)
 
     if failure_count:
         LOG.warning("%d failures were detected", failure_count)
         sys.exit(1)
+    
+    print(full_success_msg)
 
 if __name__ == "__main__":
     main()
