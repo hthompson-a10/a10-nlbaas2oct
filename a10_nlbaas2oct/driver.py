@@ -70,6 +70,9 @@ migration_opts = [
     cfg.StrOpt('a10_config_path',
                required=True,
                help='Path to config.py file used by the A10 networks lbaas driver'),
+    cfg.StrOpt('provider_name', default='a10networks',
+                required=True,
+                help='Name of LBaaS service provider')
 ]
 
 cfg.CONF.register_cli_opts(cli_opts)
@@ -346,7 +349,7 @@ def main():
 
     n_session, o_session = _setup_db_sessions()
     a10_config = a10_cfg.A10Config(config_path=CONF.migration.a10_config_path,
-                                   provider="a10networks")
+                                   provider=CONF.migration.provider_name)
 
     conf_lb_id_list = CONF.migration.lb_id_list
     if CONF.lb_id and conf_lb_id_list:
@@ -365,8 +368,10 @@ def main():
             n_lb = db_utils.get_loadbalancer_entry(n_session, lb_id)
             provider = n_lb[0]
             tenant_id = n_lb[1]
-            if provider != 'a10networks':
-                LOG.info('Skipping loadbalancer with provider %s. Not an A10 Networks loadbalancer.', provider)
+            if provider != CONF.migration.provider_name:
+                LOG.info('Skipping loadbalancer with provider %s. '
+                         'Does not match specified provider %s.',
+                         provider, CONF.migration.provider_name)
                 continue
             tenant_bindings.append(tenant_id)
 
