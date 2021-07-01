@@ -14,11 +14,10 @@
 
 import datetime
 try:
-    import functools as functools
-except:
-    # py27 backwards compatability
+    # for python3 exception raised
     import functools32 as functools
-
+except:
+    import functools
 import oslo_i18n as i18n
 from oslo_utils import uuidutils
 
