@@ -55,14 +55,18 @@ class ConfigModule(object):
 
 class A10Config(object):
 
-    def __init__(self, config_dir=None, config=None, provider=None):
+    def __init__(self, config_dir=None, config_path=None, config=None, provider=None):
         if config is not None:
             self._config = config
             self._load_config()
             return
 
-        self._config_dir = self._find_config_dir(config_dir)
-        self._config_path = os.path.join(self._config_dir, "config.py")
+
+        if not config_path:
+            self._config_dir = self._find_config_dir(config_dir)
+            self._config_path = os.path.join(self._config_dir, "config.py")
+        else:
+            self._config_path = config_path
 
         try:
             self._config = ConfigModule.load(self._config_path, provider=provider)

@@ -18,6 +18,7 @@ from oslo_config import cfg
 from oslo_db.sqlalchemy import enginefacade
 import oslo_i18n as i18n
 from oslo_log import log as logging
+from six.moves import input
 
 import acos_client
 from a10_nlbaas2oct import a10_config as a10_cfg
@@ -40,7 +41,7 @@ cli_opts = [
                help='Load balancer ID to migrate'),
     cfg.StrOpt('project-id',
                help='Migrate all load balancers owned by this project'),
-    cfg.StrOpt('cleanup',
+    cfg.BoolOpt('cleanup', default=False,
                help='Delete Neutron LBaaS db entries'),
 ]
 
@@ -109,7 +110,7 @@ def _migrate_device(LOG, a10_config, n_session, o_session, lb_id, tenant_id):
     return device_name
 
 
-def _migrate_slb(LOG, a10_config, n_session, o_session, lb_id, fl_id, tenant_id, n_lb):
+def _migrate_slb(LOG, n_session, o_session, lb_id, fl_id, tenant_id, n_lb):
 
     LOG.info('Migrating VIP port for load balancer: %s', lb_id)
     lb2oct.migrate_vip_ports(n_session, CONF.migration.octavia_account_id, lb_id, n_lb)
@@ -280,10 +281,13 @@ def _cleanup_confirmation(LOG):
     print("WARNING: This is a destructive action. Neutron LBaaS entires will be permanently deleteind")
     full_success_msg = None
     lb_success_msg = None
-    while resp != "no" or resp != "yes":
-        resp = input("Are you sure you want to delete? [yes/no]").lower()
+
+    resp = None
+    while resp != "no" and resp != "yes":
+        resp = input("Are you sure you want to delete? [yes/no]")
+        resp = resp.lower()
         if resp == "no":
-            return
+            return None, None
         elif resp == "yes":
             LOG.info('=== Starting cleanup ===')
             full_success_msg = '\n\nCleanup completed successfully'
@@ -320,13 +324,13 @@ def main():
         print('Error: Only one of --all, --lb-id, --project-id allowed.')
         return 1
     elif len(commands) == 1:
-        if CONF.lb_id_list and not (CONF.lb_id or CONF.cleanup):
+        if CONF.migration.lb_id_list and not (CONF.lb_id or CONF.cleanup):
             print('Error: Only --lb-id and --cleanup are allowed with lb_id_list set in the config file.')
             return
 
     CLEANUP_ONLY = False
     if CONF.cleanup:
-        full_success_msg, lb_success_msg = _cleanup_confirmation()
+        full_success_msg, lb_success_msg = _cleanup_confirmation(LOG)
         if full_success_msg and lb_success_msg:
             CLEANUP_ONLY = True
         else:
@@ -338,11 +342,11 @@ def main():
         lb_success_msg = 'migration of loadbalancer %s'
 
     n_session, o_session = _setup_db_sessions()
-    a10_config = a10_cfg.A10Config(config_dir=CONF.migration.a10_config_path,
+    a10_config = a10_cfg.A10Config(config_path=CONF.migration.a10_config_path,
                                    provider="a10networks")
 
     conf_lb_id_list = CONF.migration.lb_id_list
-    if CONF.lb_id:
+    if CONF.lb_id and conf_lb_id_list:
         conf_lb_id_list.append(CONF.lb_id)
     lb_id_list = db_utils.get_loadbalancer_ids(n_session, conf_lb_id_list=conf_lb_id_list,
                                                conf_project_id=CONF.project_id)
@@ -368,7 +372,7 @@ def main():
                 if device_name != curr_device_name:
                     fl_id = _migrate_flavor(LOG, a10_config, o_session, device_name)
                     curr_device_name = device_name
-                _migrate_slb(LOG, a10_config, n_session, o_session, lb_id, fl_id, tenant_id, n_lb)
+                _migrate_slb(LOG, n_session, o_session, lb_id, fl_id, tenant_id, n_lb)
             _cleanup_slb(LOG, n_session, lb_id, CLEANUP_ONLY)
 
             # Rollback everything if we are in a trial run otherwise commit
