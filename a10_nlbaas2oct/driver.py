@@ -352,10 +352,15 @@ def main():
                                    provider=CONF.migration.provider_name)
 
     conf_lb_id_list = CONF.migration.lb_id_list
-    if CONF.lb_id and conf_lb_id_list:
+    if not conf_lb_id_list:
+        conf_lb_id_list = []
+
+    if CONF.lb_id:
         conf_lb_id_list.append(CONF.lb_id)
+    
     lb_id_list = db_utils.get_loadbalancer_ids(n_session, conf_lb_id_list=conf_lb_id_list,
-                                               conf_project_id=CONF.project_id)
+                                               conf_project_id=CONF.project_id,
+                                               conf_all=CONF.all)
     fl_id = None
     failure_count = 0
     tenant_bindings = []
