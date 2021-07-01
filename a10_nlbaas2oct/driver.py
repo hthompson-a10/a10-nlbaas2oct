@@ -93,21 +93,24 @@ def _migrate_flavor(LOG, a10_config, o_session, device_name):
 
 def _migrate_device(LOG, a10_config, n_session, o_session, lb_id, tenant_id):
     if a10_config.get('use_database'):
-        device_name = aten2oct.get_device_name_by_tenant(n_session, tenant_id)
+        entry_name = aten2oct.get_device_name_by_tenant(n_session, tenant_id)
     else:
         devices = a10_config.get('devices')
-        device_name = acos_client.Hash(list(devices)).get_server(tenant_id)
-    LOG.info('Migrating Thunder device: %s', device_name)
-    device_info = a10_config.get_device(device_name)
+        entry_name = acos_client.Hash(list(devices)).get_server(tenant_id)
+    
+    device_info = a10_config.get_device(entry_name)
+    device_name = device_info.get('name')
+    LOG.info('Migrating Thunder config entry %s with name %s',
+             entry_name, device_name)
 
     try:
         aten2oct.migrate_thunder(o_session, lb_id, tenant_id, device_info)
     except aten2oct.UnsupportedAXAPIVersionException as e:
-        LOG.warning('Skipping loadbalancer %s for device %s with AXAPI version %s. '
+        LOG.warning('Skipping loadbalancer %s for config entry %s with AXAPI version %s. '
                     'Only AXAPI version 3.0 is supported.',
-                    lb_id, device_name, e.axapi_version)
+                    lb_id, entry_name, e.axapi_version)
         return
-    return device_name
+    return device_info
 
 
 def _migrate_slb(LOG, n_session, o_session, lb_id, fl_id, tenant_id, n_lb):
@@ -364,11 +367,14 @@ def main():
             tenant_id = n_lb[1]
             if provider != 'a10networks':
                 LOG.info('Skipping loadbalancer with provider %s. Not an A10 Networks loadbalancer.', provider)
-                return
+                continue
             tenant_bindings.append(tenant_id)
 
             if not CLEANUP_ONLY:
-                device_name = _migrate_device(LOG, a10_config, n_session, o_session, lb_id, tenant_id)
+                device_info = _migrate_device(LOG, a10_config, n_session, o_session, lb_id, tenant_id)
+                if not device_info:
+                    continue
+                device_name = device_info['name']
                 if device_name != curr_device_name:
                     fl_id = _migrate_flavor(LOG, a10_config, o_session, device_name)
                     curr_device_name = device_name
