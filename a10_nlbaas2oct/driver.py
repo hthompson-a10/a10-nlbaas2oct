@@ -284,13 +284,13 @@ def _setup_db_sessions():
 
 
 def _cleanup_confirmation(LOG):
-    print("WARNING: This is a destructive action. Neutron LBaaS entires will be permanently deleteind")
+    print("\nWARNING: Executing with --cleanup is a destructive action. Specified loadbalancers and child objects will be permanently deleted.")
     full_success_msg = None
     lb_success_msg = None
 
     resp = None
     while resp != "no" and resp != "yes":
-        resp = input("Are you sure you want to delete? [yes/no]")
+        resp = input("Are you sure you want to delete them? [yes/no]: ")
         resp = resp.lower()
         if resp == "no":
             return None, None
