@@ -284,13 +284,13 @@ def _setup_db_sessions():
 
 
 def _cleanup_confirmation(LOG):
-    print("WARNING: This is a destructive action. Neutron LBaaS entires will be permanently deleteind")
+    print("\nWARNING: Executing with --cleanup is a destructive action. Specified loadbalancers and child objects will be permanently deleted.")
     full_success_msg = None
     lb_success_msg = None
 
     resp = None
     while resp != "no" and resp != "yes":
-        resp = input("Are you sure you want to delete? [yes/no]")
+        resp = input("Are you sure you want to delete them? [yes/no]: ")
         resp = resp.lower()
         if resp == "no":
             return None, None
@@ -352,10 +352,15 @@ def main():
                                    provider=CONF.migration.provider_name)
 
     conf_lb_id_list = CONF.migration.lb_id_list
-    if CONF.lb_id and conf_lb_id_list:
+    if not conf_lb_id_list:
+        conf_lb_id_list = []
+
+    if CONF.lb_id:
         conf_lb_id_list.append(CONF.lb_id)
+    
     lb_id_list = db_utils.get_loadbalancer_ids(n_session, conf_lb_id_list=conf_lb_id_list,
-                                               conf_project_id=CONF.project_id)
+                                               conf_project_id=CONF.project_id,
+                                               conf_all=CONF.all)
     fl_id = None
     failure_count = 0
     tenant_bindings = []
