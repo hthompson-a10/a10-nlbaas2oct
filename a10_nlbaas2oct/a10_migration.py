@@ -18,7 +18,6 @@ try:
 except:
     # py27 backwards compatability
     import functools32 as functools
-
 import oslo_i18n as i18n
 from oslo_utils import uuidutils
 
