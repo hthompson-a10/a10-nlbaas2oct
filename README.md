@@ -65,8 +65,8 @@ octavia_db_connection =
 # Connection string for the A10 database used in the octavia env
 # a10_oct_connection =
 
-# Path to config file. Default is /etc/a10
-a10_config_path = /etc/a10
+# Path to config file. Default is /etc/a10/config.py
+a10_config_path = /etc/a10/config.py
 ```
 
 ## Step 2: Modify the config file
@@ -99,8 +99,8 @@ neutron_db_connection = mysql+pymysql://user:password@127.0.0.1/neutron?charset=
 # Connection string for the octavia database
 octavia_db_connection = mysql+pymysql://root:password@127.0.0.1:3306/octavia
 
-# Path to config file. Default is /etc/a10
-a10_config_path = /etc/a10
+# Path to config file. Default is /etc/a10/config.py
+a10_config_path = /etc/a10/config.py
 ```
 
 ### Config for migrating from Neutron LBaaS to Octavia across hosts
@@ -114,8 +114,8 @@ neutron_db_connection = mysql+pymysql://user:password@127.0.0.1/neutron?charset=
 # Connection string for the octavia database
 octavia_db_connection = mysql+pymysql://root:password@<b>ip_address_of_remote_host</b>:3306/octavia
 
-# Path to config file. Default is /etc/a10
-a10_config_path = /etc/a10
+# Path to config file. Default is /etc/a10/config.py
+a10_config_path = /etc/a10/config.py
 </pre>
 
 ### Performing cross host migration when A10 database is seperate from Neutron DB and Octavia DB 
@@ -130,8 +130,8 @@ neutron_db_connection = mysql+pymysql://user:password@127.0.0.1/neutron?charset=
 # Connection string for the octavia database
 octavia_db_connection = mysql+pymysql://root:password@<b>ip_address_of_remote_host</b>:3306/octavia
 
-# Path to config file. Default is /etc/a10
-a10_config_path = /etc/a10
+# Path to config file. Default is /etc/a10/config.py
+a10_config_path = /etc/a10/config.py
 
 # Connection string for the A10 database used in neutron lbaas env
 a10_nlbaas_db_connection = mysql+pymysql://user:password@127.0.0.1/a10_db
@@ -160,6 +160,19 @@ a10_nlbaas2oct --config-file /path/to/a10_nlbaas2oct.conf --project-id <project_
 ```
 a10_nlbaas2oct --config-file /path/to/a10_nlbaas2oct.conf --all
 ```
+
+## Step 4*: Cleanup post migration
+
+There is a foreign key association with the VIP Port in the Neutron port table and the VIP entries in the Neutron lbaas_loadbalancer table. When performing a migration from Neutron LBaaS to Octavia, the VIPs are migrated to their own table and VIP port ownership is transferred to Octavia.
+
+However, that foreign key relationship between VIP and VIP Port will still exist in the Neutron lbaas_loadbalancer table and the port table. Therefore, a delete action on either the load balancer in the Neutron LBaaS table or the Octavia will result in a failure due to the deadlocked foreign key state. As such, it is required that the Neutron LBaaS database entries are deleted or otherwise made inaccessible before performing `delete` commands via Octavia.
+
+```
+a10_nlbaas2oct --config-file /path/to/a10_nlbaas2oct.conf [--lb-id <lb_id> | --all | --project-id <project_id>]  --cleanup
+```
+
+**This step is only necessary if the `delete_after_migration` was not set to `True` in the config.*
+
 
 ### Note to Reader
 
