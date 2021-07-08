@@ -61,6 +61,9 @@ migration_opts = [
     cfg.StrOpt('octavia_db_connection',
                required=True,
                help='The octavia database connection string'),
+    cfg.StrOpt('keystone_db_connection',
+               required=False,
+               help='The keystone database connection string'),
     cfg.StrOpt('a10_nlbaas_db_connection',
                required=False,
                help='The a10 nlbaas database connection string'),
@@ -94,9 +97,9 @@ def _migrate_flavor(LOG, a10_config, o_session, device_name):
     return fl_id
 
 
-def _migrate_device(LOG, a10_config, n_session, o_session, lb_id, tenant_id):
+def _migrate_device(LOG, a10_config, db_sessions, lb_id, tenant_id):
     if a10_config.get('use_database'):
-        entry_name = aten2oct.get_device_name_by_tenant(n_session, tenant_id)
+        entry_name = aten2oct.get_device_name_by_tenant(db_sessions['a10_nlbaas_session'], tenant_id)
     else:
         devices = a10_config.get('devices')
         entry_name = acos_client.Hash(list(devices)).get_server(tenant_id)
@@ -105,9 +108,11 @@ def _migrate_device(LOG, a10_config, n_session, o_session, lb_id, tenant_id):
     device_name = device_info.get('name')
     LOG.info('Migrating Thunder config entry %s with name %s',
              entry_name, device_name)
+    use_parent = a10_config.get('use_parent_project')
 
     try:
-        aten2oct.migrate_thunder(o_session, lb_id, tenant_id, device_info)
+        k_session = db_sessions.get('k_session')
+        aten2oct.migrate_thunder(db_sessions['a10_oct_session'], lb_id, tenant_id, device_info, use_parent, k_session)
     except aten2oct.UnsupportedAXAPIVersionException as e:
         LOG.warning('Skipping loadbalancer %s for config entry %s with AXAPI version %s. '
                     'Only AXAPI version 3.0 is supported.',
@@ -223,7 +228,7 @@ def _cleanup_slb(LOG, n_session, lb_id, cleanup=False):
     LOG.info('Successful cascading delete of loadbalancer %s.', lb_id)
 
 
-def _cleanup_tenant_bindings(LOG, n_session, a10_config, tenant_bindings, cleanup=False):
+def _cleanup_tenant_bindings(LOG, a10_nlbaas_session, a10_config, tenant_bindings, cleanup=False):
     failure_count = 0
     if not CONF.migration.delete_after_migration and not cleanup:
         return failure_count
@@ -234,15 +239,15 @@ def _cleanup_tenant_bindings(LOG, n_session, a10_config, tenant_bindings, cleanu
         if a10_config.get('use_database'):
             for tenant_binding in tenant_bindings:
                 LOG.info('Deleting A10 tenant biding for tenant: %s', tenant_binding)
-                aten2oct.delete_binding_by_tenant(n_session, tenant_binding)
+                aten2oct.delete_binding_by_tenant(a10_nlbaas_session, tenant_binding)
             if CONF.migration.trial_run:
-                n_session.rollback()
+                a10_nlbaas_session.rollback()
                 LOG.info('Simulated deletion of A10 tenant bindings successful.')
             elif len(tenant_bindings) > 0:
-                n_session.commit()
+                a10_nlbaas_session.commit()
                 LOG.info('Deletion of A10 tenant bindings successful')
     except Exception as e:
-        n_session.rollback()
+        a10_nlbaas_session.rollback()
         LOG.exception("Skipping A10 tenant binding deletion due to: %s.", str(e))
         failure_count += 1
 
@@ -262,6 +267,16 @@ def _setup_db_sessions():
     o_session_maker = octavia_context_manager.writer.get_sessionmaker()
     o_session = o_session_maker(autocommit=False)
 
+    db_sessions = {'n_session': n_session, 'o_session': o_session}
+
+    if CONF.migration.keystone_db_connection:
+        keystone_context_manager = enginefacade.transaction_context()
+        keystone_context_manager.configure(
+            connection=CONF.migration.keystone_db_connection)
+        k_session_maker = keystone_context_manager.writer.get_sessionmaker()
+        k_session = k_session_maker(autocommit=False)
+        db_sessions['k_session'] = k_session
+
     if CONF.migration.a10_nlbaas_db_connection:
         a10_nlbaas_context_manager = enginefacade.transaction_context()
         a10_nlbaas_context_manager.configure(
@@ -270,6 +285,7 @@ def _setup_db_sessions():
         a10_nlbaas_session = a10_nlbaas_session_maker(autocommit=False)
     else:
         a10_nlbaas_session = n_session
+    db_sessions['a10_nlbaas_session'] = a10_nlbaas_session
 
     if CONF.migration.a10_oct_db_connection:
         a10_oct_context_manager = enginefacade.transaction_context()
@@ -279,9 +295,9 @@ def _setup_db_sessions():
         a10_oct_session = a10_oct_session_maker(autocommit=False)
     else:
         a10_oct_session = o_session
-    
-    return a10_nlbaas_session, a10_oct_session
+    db_sessions['a10_oct_session'] = a10_oct_session
 
+    return db_sessions
 
 def _cleanup_confirmation(LOG):
     print("\nWARNING: Executing with --cleanup is a destructive action. Specified loadbalancers and child objects will be permanently deleted.")
@@ -347,7 +363,10 @@ def main():
         full_success_msg = '\n\nMigration completed successfully'
         lb_success_msg = 'migration of loadbalancer %s'
 
-    n_session, o_session = _setup_db_sessions()
+    db_sessions = _setup_db_sessions()
+    n_session = db_sessions['n_session']
+    o_session = db_sessions['o_session']
+    
     a10_config = a10_cfg.A10Config(config_path=CONF.migration.a10_config_path,
                                    provider=CONF.migration.provider_name)
 
@@ -381,7 +400,7 @@ def main():
             tenant_bindings.append(tenant_id)
 
             if not CLEANUP_ONLY:
-                device_info = _migrate_device(LOG, a10_config, n_session, o_session, lb_id, tenant_id)
+                device_info = _migrate_device(LOG, a10_config, db_sessions, lb_id, tenant_id)
                 if not device_info:
                     continue
                 device_name = device_info['name']
@@ -412,8 +431,8 @@ def main():
             db_utils.unlock_loadbalancer(n_session, lb_id)
             n_session.commit()
 
-    failure_count += _cleanup_tenant_bindings(LOG, n_session, a10_config,
-                                              tenant_bindings, CLEANUP_ONLY)
+    failure_count += _cleanup_tenant_bindings(LOG, db_sessions['a10_nlbaas_session'],
+                                              a10_config, tenant_bindings, CLEANUP_ONLY)
 
     if failure_count:
         LOG.warning("%d failures were detected", failure_count)

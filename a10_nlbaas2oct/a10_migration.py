@@ -12,6 +12,7 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
+from a10_nlbaas2oct import db_utils
 import datetime
 try:
     # for python3 exception raised
@@ -36,11 +37,23 @@ class IncorrectPartitionTypeException(Exception):
         super(IncorrectPartitionTypeException, self).__init__(self.message)
 
 
+class KeystoneDBConnectionException(Exception):
+
+    def __init__(self):
+        self.message = ("'use_parent_project' is set to True in the a10 config "
+                        "but a connection string for the keystone database "
+                        "was not set in the migration config")
+        self.message = _(self.message) # Apply translator
+        super(KeystoneDBConnectionException, self).__init__(self.message)
+
+
 class UnsupportedAXAPIVersionException(Exception):
 
     def __init__(self, axapi_version):
-        self.axapi_version = axapi_version
-        super(IncorrectPartitionTypeException, self).__init__(self.message)
+        self.message = ("AXAPI version {} was found but only 3.0 is supported "
+                        "for migration")
+        self.message = _(self.message.format(axapi_version)) # Apply translator
+        super(UnsupportedAXAPIVersionException, self).__init__(self.message)
 
 
 def get_device_name_by_tenant(a10_nlbaas_session, tenant_id):
@@ -65,7 +78,8 @@ def delete_binding_by_tenant(a10_nlbaas_session, tenant_id):
         {'tenant_id': tenant_id})
 
 
-def migrate_thunder(a10_oct_session, loadbalancer_id, tenant_id, device_info):
+def migrate_thunder(a10_oct_session, loadbalancer_id, tenant_id,
+                    device_info, use_parent=False, k_session=None):
     # Create thunder entry
 
     vthunder_id = uuidutils.generate_uuid()
@@ -74,8 +88,15 @@ def migrate_thunder(a10_oct_session, loadbalancer_id, tenant_id, device_info):
         hierarchical_multitenancy = "disable"
         partition_name = device_info['shared_partition']
     elif device_info['v_method'] == "ADP":
-        hierarchical_multitenancy = "enable"
-        partition_name = tenant_id[0:13]
+        if use_parent:
+            if not k_session:
+                raise KeystoneDBConnectionException()
+            hierarchical_multitenancy = "enable"
+            parent_id = db_utils.get_parent_project(k_session, tenant_id)
+            partition_name = parent_id[0][0:13]
+        else:
+            hierarchical_multitenancy = "enable"
+            partition_name = tenant_id[0:13]
     else:
         raise IncorrectPartitionTypeException(device_info['v_method'])
 
