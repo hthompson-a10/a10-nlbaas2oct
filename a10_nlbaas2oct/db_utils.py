@@ -232,3 +232,9 @@ def cascade_delete_neutron_lb(n_session, lb_id):
     # Delete the load balanacer
     n_session.execute(
         "DELETE FROM lbaas_loadbalancers WHERE id = :lb_id;", {'lb_id': lb_id})
+
+
+def get_parent_project(k_session, tenant_id):
+    parent_id = k_session.execute(
+        "SELECT parent_id FROM project WHERE id = :id;", {'id': tenant_id}).fetchone()
+    return parent_id
