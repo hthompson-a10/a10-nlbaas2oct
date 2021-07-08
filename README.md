@@ -140,6 +140,24 @@ a10_nlbaas_db_connection = mysql+pymysql://user:password@127.0.0.1/a10_db
 a10_oct_connection = mysql+pymysql://user:password@<b>ip_address_of_remote_host</b>/a10_db
 </pre>
 
+### Performing migration when using parent projects
+<pre>
+# Octavia service account ID or username (ex: admin)
+octavia_account_id = admin
+
+# Connection string for the keystone database
+<b>keystone_db_connection = mysql+pymysql://user:password@127.0.0.1/keystone?charset=utf8</b>
+
+# Connection string for the neutron database
+neutron_db_connection = mysql+pymysql://user:password@127.0.0.1/neutron?charset=utf8
+
+# Connection string for the octavia database
+octavia_db_connection = mysql+pymysql://root:password@127.0.0.1:3306/octavia
+
+# Path to config file. Default is /etc/a10/config.py
+a10_config_path = /etc/a10/config.py
+</pre>
+
 ## Step 3: Perform the migration
 
 ### Migrate a single loadbalancer and its child objects
