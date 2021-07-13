@@ -121,7 +121,7 @@ def _migrate_device(LOG, a10_config, db_sessions, lb_id, tenant_id):
     return device_info
 
 
-def _migrate_slb(LOG, n_session, o_session, lb_id, fl_id, tenant_id, n_lb):
+def _migrate_slb(LOG, axapi_client, n_session, o_session, lb_id, fl_id, tenant_id, n_lb):
 
     LOG.info('Migrating VIP port for load balancer: %s', lb_id)
     lb2oct.migrate_vip_ports(n_session, CONF.migration.octavia_account_id, lb_id, n_lb)
@@ -131,6 +131,8 @@ def _migrate_slb(LOG, n_session, o_session, lb_id, fl_id, tenant_id, n_lb):
 
     LOG.info('Migrating VIP for load balancer: %s', lb_id)
     lb2oct.migrate_vip(n_session, o_session, lb_id, n_lb)
+
+    pool_listener = {}
 
     # Start pool migration
     pools = db_utils.get_pool_entries_by_lb(n_session, lb_id)
@@ -175,6 +177,9 @@ def _migrate_slb(LOG, n_session, o_session, lb_id, fl_id, tenant_id, n_lb):
     listeners, lb_stats = db_utils.get_listeners_and_stats_by_lb(n_session, lb_id)
     for listener in listeners:
         listener_id = listener[0]
+        axapi_listener = axapi_client.slb.virtual_port.get(lb_id, listener_id,
+                                                           listener[3], listener[4])
+        pool_id = axapi_listener.get('service-group')
         listener_state = listener[8]
         LOG.debug('Migrating listener: %s', listener_id)
         if listener_state == 'DELETED':
@@ -182,7 +187,7 @@ def _migrate_slb(LOG, n_session, o_session, lb_id, fl_id, tenant_id, n_lb):
         elif listener_state != 'ACTIVE':
             raise Exception(_('Listener is invalid state of %s.'),
                              listener_state)
-        lb2oct.migrate_listener(n_session, o_session, lb_id, n_lb, listener, lb_stats)
+        lb2oct.migrate_listener(n_session, o_session, lb_id, n_lb, listener, pool_id, lb_stats)
 
         # Handle SNI certs
         SNIs = db_utils.get_SNIs_by_listener(n_session, listener_id)
@@ -299,6 +304,19 @@ def _setup_db_sessions():
 
     return db_sessions
 
+
+def _create_axapi_client(device_info):
+    host = device_info.get('host')
+    username = device_info.get('username')
+    password = device_info.get('password')
+    port = device_info.get('port', 443)
+    protocol = device_info.get('protocol', 'https')
+    axapi_client = acos_client.Client(host, acos_client.AXAPI_30,
+                                      username, password, port=port,
+                                      protocol=protocol)
+    return axapi_client
+
+
 def _cleanup_confirmation(LOG):
     print("\nWARNING: Executing with --cleanup is a destructive action. Specified loadbalancers and child objects will be permanently deleted.")
     full_success_msg = None
@@ -407,7 +425,8 @@ def main():
                 if device_name != curr_device_name:
                     fl_id = _migrate_flavor(LOG, a10_config, o_session, device_name)
                     curr_device_name = device_name
-                _migrate_slb(LOG, n_session, o_session, lb_id, fl_id, tenant_id, n_lb)
+                axapi_client = _create_axapi_client(device_info)
+                _migrate_slb(LOG, axapi_client, n_session, o_session, lb_id, fl_id, tenant_id, n_lb)
             _cleanup_slb(LOG, n_session, lb_id, CLEANUP_ONLY)
 
             # Rollback everything if we are in a trial run otherwise commit

@@ -101,7 +101,11 @@ def migrate_vip(n_session, o_session, lb_id, n_lb):
                         'database.'))
 
 
-def migrate_listener(n_session, o_session, lb_id, n_lb, listener, lb_stats):
+def migrate_listener(n_session, o_session, lb_id, n_lb, pool_id, listener, lb_stats):
+
+    if listener[6] != 'NULL' and listener[6] != None:
+        pool_id = listener[6]
+
     # Create listener
     result = o_session.execute(
         "INSERT INTO listener (id, project_id, name, description, "
@@ -120,7 +124,7 @@ def migrate_listener(n_session, o_session, lb_id, n_lb, listener, lb_stats):
          'connection_limit': listener[5],
          'load_balancer_id': lb_id,
          'tls_certificate_id': listener[10],
-         'default_pool_id': listener[6],
+         'default_pool_id': pool_id,
          'provisioning_status': listener[8],
          'operating_status': listener[9], 'enabled': listener[7],
          'created_at': datetime.datetime.utcnow(),
