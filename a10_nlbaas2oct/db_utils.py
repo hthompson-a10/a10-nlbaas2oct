@@ -119,12 +119,20 @@ def get_l7policies_by_listener(n_session, listener_id):
     return l7policies
 
 
-def get_l7rules_by_l7policy(n_session, l7policy_id):
-    l7rules = n_session.execute(
-        "SELECT id, type, compare_type, invert, `key`, value, "
-        "provisioning_status, admin_state_up FROM lbaas_l7rules WHERE "
-        "l7policy_id = :l7policy_id AND provisioning_status = 'ACTIVE';",
-        {'l7policy_id': l7policy_id}).fetchall()
+def get_l7rules_by_l7policy(n_session, l7policy_id, ignore_l7rule_status=False):
+    if ignore_l7rule_status:
+        l7rules = n_session.execute(
+            "SELECT id, type, compare_type, invert, `key`, value, "
+            "provisioning_status, admin_state_up FROM lbaas_l7rules WHERE "
+            "l7policy_id = :l7policy_id AND (provisioning_status = 'ACTIVE' "
+            "OR provisioning_status = 'PENDING_CREATE');",
+            {'l7policy_id': l7policy_id}).fetchall()
+    else:
+        l7rules = n_session.execute(
+            "SELECT id, type, compare_type, invert, `key`, value, "
+            "provisioning_status, admin_state_up FROM lbaas_l7rules WHERE "
+            "l7policy_id = :l7policy_id AND provisioning_status = 'ACTIVE';",
+            {'l7policy_id': l7policy_id}).fetchall()
     return l7rules
 
 

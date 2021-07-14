@@ -75,7 +75,10 @@ migration_opts = [
                help='Path to config.py file used by the A10 networks lbaas driver'),
     cfg.StrOpt('provider_name', default='a10networks',
                 required=True,
-                help='Name of LBaaS service provider')
+                help='Name of LBaaS service provider'),
+    cfg.BoolOpt('ignore_l7rule_status', default=False,
+                required=True,
+                help='Migrate all pending create l7rules')
 ]
 
 cfg.CONF.register_cli_opts(cli_opts)
@@ -121,7 +124,8 @@ def _migrate_device(LOG, a10_config, db_sessions, lb_id, tenant_id):
     return device_info
 
 
-def _migrate_slb(LOG, n_session, o_session, lb_id, fl_id, tenant_id, n_lb):
+def _migrate_slb(LOG, n_session, o_session, lb_id, fl_id, tenant_id, n_lb,
+                 ignore_l7rule_status=False):
 
     LOG.info('Migrating VIP port for load balancer: %s', lb_id)
     lb2oct.migrate_vip_ports(n_session, CONF.migration.octavia_account_id, lb_id, n_lb)
@@ -203,19 +207,20 @@ def _migrate_slb(LOG, n_session, o_session, lb_id, fl_id, tenant_id, n_lb):
                 raise Exception(_('L7 policy is invalid state of %s.'),
                                 l7policy_state)                    
             lb2oct.migrate_l7policy(o_session, tenant_id, listener_id, l7policy)
-            
+
             # Handle L7 rule records
-            l7rules = db_utils.get_l7rules_by_l7policy(n_session, l7policy_id)
+            l7rules = db_utils.get_l7rules_by_l7policy(n_session, l7policy_id, ignore_l7rule_status)
             for l7rule in l7rules:
                 l7rule_id = l7rule[0]
                 l7rule_state = l7rule[6]
                 LOG.debug('Migrating L7 rule: %s', l7rule_id)
                 if l7rule_state == 'DELETED':
                     continue
-                elif l7rule_state != 'ACTIVE':
+                elif l7rule_state != 'ACTIVE' and not ignore_l7rule_status:
                     raise Exception(_('L7 rule is invalid state of %s.'),
                                     l7rule_state)
-                lb2oct.migrate_l7rule(o_session, tenant_id, l7policy, l7rule)
+                lb2oct.migrate_l7rule(o_session, tenant_id, l7policy, l7rule,
+                                      ignore_l7rule_status)
 
 
 def _cleanup_slb(LOG, n_session, lb_id, cleanup=False):
@@ -407,7 +412,8 @@ def main():
                 if device_name != curr_device_name:
                     fl_id = _migrate_flavor(LOG, a10_config, o_session, device_name)
                     curr_device_name = device_name
-                _migrate_slb(LOG, n_session, o_session, lb_id, fl_id, tenant_id, n_lb)
+                _migrate_slb(LOG, n_session, o_session, lb_id,
+                             fl_id, tenant_id, n_lb, CONF.migration.ignore_l7rule_status)
             _cleanup_slb(LOG, n_session, lb_id, CLEANUP_ONLY)
 
             # Rollback everything if we are in a trial run otherwise commit
