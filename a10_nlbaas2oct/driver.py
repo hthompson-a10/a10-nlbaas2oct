@@ -219,7 +219,8 @@ def _migrate_slb(LOG, n_session, o_session, lb_id, fl_id, tenant_id, n_lb,
                 elif l7rule_state != 'ACTIVE' and not ignore_l7rule_status:
                     raise Exception(_('L7 rule is invalid state of %s.'),
                                     l7rule_state)
-                lb2oct.migrate_l7rule(o_session, tenant_id, l7policy, l7rule)
+                lb2oct.migrate_l7rule(o_session, tenant_id, l7policy, l7rule,
+                                      ignore_l7rule_status)
 
 
 def _cleanup_slb(LOG, n_session, lb_id, cleanup=False):

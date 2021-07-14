@@ -185,8 +185,14 @@ def migrate_l7policy(o_session, project_id, listener_id, l7policy):
                             'database.'))
 
 
-def migrate_l7rule(o_session, project_id, l7policy, l7rule):
+def migrate_l7rule(o_session, project_id, l7policy, l7rule, ignore_l7rule_status):
     # Create L7rule
+
+    provisioning_status = l7rule[6]
+    if ignore_l7rule_status:
+        provisioning_status = 'ACTIVE'
+
+
     L7r_op_status = 'ONLINE' if l7rule[7] else 'OFFLINE'
     result = o_session.execute(
         "INSERT INTO l7rule (id, l7policy_id, type, compare_type, "
@@ -198,7 +204,7 @@ def migrate_l7rule(o_session, project_id, l7policy, l7rule):
         {'id': l7rule[0], 'l7policy_id': l7policy[0],
          'type': l7rule[1], 'compare_type': l7rule[2],
          'key': l7rule[4], 'value': l7rule[5], 'invert': l7rule[3],
-         'provisioning_status': l7rule[6],
+         'provisioning_status': provisioning_status,
          'created_at': datetime.datetime.utcnow(),
          'updated_at': datetime.datetime.utcnow(),
          'project_id': project_id, 'enabled': l7rule[7],
